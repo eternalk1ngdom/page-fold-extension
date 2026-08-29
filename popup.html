@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body {
+      width: 290px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      margin: 0;
+      padding: 14px;
+      color: #1f2937;
+      background: #ffffff;
+      box-sizing: border-box;
+    }
+    h3 {
+      margin: 0 0 12px 0;
+      font-size: 15px;
+      color: #111827;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .option-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 0;
+      border-bottom: 1px solid #f3f4f6;
+      font-size: 13px;
+    }
+    .switch {
+      position: relative;
+      display: inline-block;
+      width: 38px;
+      height: 20px;
+    }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .slider {
+      position: absolute;
+      cursor: pointer;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background-color: #d1d5db;
+      transition: .2s;
+      border-radius: 20px;
+    }
+    .slider:before {
+      position: absolute;
+      content: "";
+      height: 14px;
+      width: 14px;
+      left: 3px;
+      bottom: 3px;
+      background-color: white;
+      transition: .2s;
+      border-radius: 50%;
+    }
+    input:checked + .slider { background-color: #2563eb; }
+    input:checked + .slider:before { transform: translateX(18px); }
+
+    .link-btn {
+      color: #2563eb;
+      text-decoration: none;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .link-btn:hover {
+      text-decoration: underline;
+    }
+
+    .style-section {
+      margin-top: 10px;
+      padding-top: 6px;
+    }
+    .theme-select {
+      width: 100%;
+      padding: 6px;
+      border: 1px solid #d1d5db;
+      border-radius: 5px;
+      font-size: 12px;
+      margin-top: 6px;
+      outline: none;
+      background: #f9fafb;
+    }
+    .css-editor {
+      width: 100%;
+      height: 75px;
+      font-family: monospace;
+      font-size: 11px;
+      padding: 6px;
+      margin-top: 6px;
+      border: 1px solid #d1d5db;
+      border-radius: 5px;
+      box-sizing: border-box;
+      resize: vertical;
+      background: #f8fafc;
+      color: #0f172a;
+    }
+    .btn-apply-css {
+      width: 100%;
+      margin-top: 6px;
+      padding: 5px;
+      background-color: #e0f2fe;
+      color: #0369a1;
+      border: 1px solid #bae6fd;
+      border-radius: 5px;
+      font-size: 12px;
+      cursor: pointer;
+      font-weight: 500;
+    }
+    .btn-apply-css:hover {
+      background-color: #bae6fd;
+    }
+
+    .btn-clear {
+      width: 100%;
+      margin-top: 10px;
+      padding: 7px;
+      background-color: #fee2e2;
+      color: #991b1b;
+      border: 1px solid #fca5a5;
+      border-radius: 6px;
+      font-size: 12px;
+      cursor: pointer;
+      font-weight: 500;
+    }
+    .btn-clear:hover {
+      background-color: #fecaca;
+    }
+  </style>
+</head>
+<body>
+  <h3>📖 Text Folder</h3>
+
+  <div class="option-row">
+    <span>启用插件功能</span>
+    <label class="switch">
+      <input type="checkbox" id="toggle-enabled" checked>
+      <span class="slider"></span>
+    </label>
+  </div>
+
+  <div class="option-row">
+    <span>设为折叠后立即收起</span>
+    <label class="switch">
+      <input type="checkbox" id="toggle-collapse-initially" checked>
+      <span class="slider"></span>
+    </label>
+  </div>
+
+  <div class="option-row">
+    <span>刷新自动恢复折叠<span style="color: #ef4444; font-size: 11px; margin-left: 2px;">(实验功能)</span></span>
+    <label class="switch">
+      <input type="checkbox" id="toggle-auto-save">
+      <span class="slider"></span>
+    </label>
+  </div>
+
+  <div class="option-row">
+    <span>快捷键配置</span>
+    <a href="#" id="btn-config-shortcuts" class="link-btn">设置按键 ⚙️</a>
+  </div>
+
+  <div class="style-section">
+    <div style="font-size: 13px; font-weight: 500; color: #374151;">折叠框外观风格</div>
+    <select id="theme-preset" class="theme-select">
+      <option value="blue">❄️ 经典冰蓝 (默认柔和)</option>
+      <option value="gray">🔘 暗灰极简 (无感融合)</option>
+      <option value="green">🍃 护眼淡绿 (舒适阅读)</option>
+      <option value="yellow">📜 暖调柔金 (醒目高亮)</option>
+      <option value="custom">✏️ 自定义 CSS 样式...</option>
+    </select>
+    <textarea id="custom-css" class="css-editor" placeholder="在这里编写自定义 CSS 规则..."></textarea>
+    <button id="btn-save-css" class="btn-apply-css">保存并应用样式</button>
+  </div>
+
+  <button id="btn-clear-page" class="btn-clear">清空本页所有折叠区域</button>
+
+  <script src="popup.js"></script>
+</body>
+</html>
