@@ -2,47 +2,121 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
+  <title>Text Folder 设置</title>
+  
   <style>
-    body {
-      width: 290px;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      margin: 0;
-      padding: 14px;
-      color: #1f2937;
-      background: #ffffff;
-      box-sizing: border-box;
+    /* =========================================================================
+       1. 全局设计令牌（Design Tokens / CSS Variables）
+       ========================================================================= */
+    :root {
+      --bg-primary: #ffffff;      /* 弹窗主背景色 */
+      --bg-secondary: #f8fafc;    /* 次级/悬浮背景色 */
+      --text-main: #1e293b;       /* 正文主要文字颜色 */
+      --text-muted: #64748b;      /* 辅助/说明文字颜色 */
+      --border-color: #e2e8f0;    /* 分割线与通用边框色 */
+      --accent-color: #3b82f6;    /* 品牌主色调（经典蓝） */
+      --danger-color: #ef4444;    /* 警告与删除强调色 */
+      --danger-hover: #dc2626;    /* 危险操作悬浮色 */
+      --warning-color: #d97706;   /* 提示告警色 */
     }
-    h3 {
-      margin: 0 0 12px 0;
+
+    /* 基础盒模型重置 */
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    /* 扩展弹窗根容器规范 */
+    body {
+      width: 340px;               /* 锁定 Popup 弹窗宽度 */
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      font-size: 13px;
+      color: var(--text-main);
+      background-color: var(--bg-primary);
+      padding: 16px;
+      user-select: none;          /* 禁止设置界面文本被意外框选 */
+    }
+
+    /* =========================================================================
+       2. 顶部导航与通用区块布局
+       ========================================================================= */
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 14px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--border-color);
+    }
+
+    .title {
       font-size: 15px;
-      color: #111827;
+      font-weight: 600;
       display: flex;
       align-items: center;
       gap: 6px;
     }
-    .option-row {
+
+    .section {
+      margin-bottom: 14px;
+    }
+
+    .section-title {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-muted);
+      margin-bottom: 8px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
       display: flex;
       justify-content: space-between;
       align-items: center;
-      padding: 8px 0;
-      border-bottom: 1px solid #f3f4f6;
-      font-size: 13px;
     }
+
+    .option-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 6px 0;
+    }
+
+    /* 实验功能标签 */
+    .tag-exp {
+      font-size: 11px;
+      color: var(--danger-color);
+      font-weight: 500;
+      margin-left: 2px;
+    }
+
+    /* =========================================================================
+       3. 核心控件：iOS 风格滑动开关 (Toggle Switch)
+       ========================================================================= */
     .switch {
       position: relative;
       display: inline-block;
       width: 38px;
       height: 20px;
     }
-    .switch input { opacity: 0; width: 0; height: 0; }
+
+    /* 隐藏原生 Checkbox 输入框 */
+    .switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+
+    /* 开关背景槽 */
     .slider {
       position: absolute;
       cursor: pointer;
       top: 0; left: 0; right: 0; bottom: 0;
-      background-color: #d1d5db;
-      transition: .2s;
+      background-color: #cbd5e1;
+      transition: .3s;
       border-radius: 20px;
     }
+
+    /* 开关圆形滑块 */
     .slider:before {
       position: absolute;
       content: "";
@@ -51,130 +125,315 @@
       left: 3px;
       bottom: 3px;
       background-color: white;
-      transition: .2s;
+      transition: .3s;
       border-radius: 50%;
     }
-    input:checked + .slider { background-color: #2563eb; }
-    input:checked + .slider:before { transform: translateX(18px); }
 
-    .link-btn {
-      color: #2563eb;
-      text-decoration: none;
+    /* 激活态颜色与位移 */
+    input:checked + .slider {
+      background-color: var(--accent-color);
+    }
+
+    input:checked + .slider:before {
+      transform: translateX(18px);
+    }
+
+    /* =========================================================================
+       4. 主题预设网格与自定义 CSS 抽屉面板
+       ========================================================================= */
+    .theme-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+
+    .theme-card {
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      padding: 8px 10px;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      transition: border-color 0.2s, background-color 0.2s;
+    }
+
+    .theme-card:hover {
+      background-color: var(--bg-secondary);
+    }
+
+    .theme-card.active {
+      border-color: var(--accent-color);
+      background-color: #eff6ff;
+    }
+
+    .theme-header {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-weight: 500;
+      font-size: 13px;
+    }
+
+    .theme-sub {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-left: 18px;
+    }
+
+    /* 二级自定义 CSS 折叠抽屉切换按钮 */
+    .custom-css-toggle {
+      width: 100%;
+      background: none;
+      border: 1px dashed var(--border-color);
+      border-radius: 6px;
+      padding: 6px;
+      color: var(--accent-color);
       font-size: 12px;
       cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      transition: all 0.2s;
     }
+
+    .custom-css-toggle:hover {
+      background-color: #eff6ff;
+      border-color: var(--accent-color);
+    }
+
+    /* 自定义 CSS 展开面板 */
+    .custom-css-panel {
+      display: none;              /* 默认折叠收起 */
+      margin-top: 8px;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .custom-css-panel.open {
+      display: flex;              /* 展开状态 */
+    }
+
+    .css-textarea {
+      width: 100%;
+      height: 90px;
+      font-family: Consolas, Monaco, "Courier New", monospace;
+      font-size: 11px;
+      color: #334155;
+      padding: 6px 8px;
+      border: 1px solid var(--border-color);
+      border-radius: 4px;
+      background-color: var(--bg-secondary);
+      resize: vertical;
+      line-height: 1.4;
+      user-select: text;          /* 允许选中和编辑代码 */
+    }
+
+    .css-textarea:focus {
+      outline: none;
+      border-color: var(--accent-color);
+      background-color: #fff;
+    }
+
+    /* =========================================================================
+       5. 按钮系统与底部反馈提示
+       ========================================================================= */
+    .btn-group {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-top: 6px;
+    }
+
+    .btn {
+      width: 100%;
+      padding: 7px 0;
+      font-size: 12px;
+      font-weight: 500;
+      border-radius: 6px;
+      border: 1px solid var(--border-color);
+      background-color: var(--bg-primary);
+      color: var(--text-main);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      transition: background-color 0.2s, border-color 0.2s;
+    }
+
+    .btn:hover {
+      background-color: var(--bg-secondary);
+    }
+
+    .btn-sm {
+      padding: 5px 0;
+      font-size: 11px;
+    }
+
+    /* 强调型按钮 */
+    .btn-accent {
+      background-color: #eff6ff;
+      border-color: #bfdbfe;
+      color: var(--accent-color);
+    }
+    .btn-accent:hover {
+      background-color: #dbeafe;
+    }
+
+    /* 轻度警告按钮（单页清理） */
+    .btn-danger-light {
+      border-color: #fed7aa;
+      color: var(--warning-color);
+      background-color: #fffbeb;
+    }
+    .btn-danger-light:hover {
+      background-color: #fef3c7;
+      border-color: #f59e0b;
+    }
+
+    /* 高危操作按钮（全网重置） */
+    .btn-danger-solid {
+      border-color: #fca5a5;
+      color: var(--danger-color);
+      background-color: #fef2f2;
+    }
+    .btn-danger-solid:hover {
+      background-color: #fee2e2;
+      border-color: var(--danger-color);
+    }
+
+    .link-btn {
+      color: var(--accent-color);
+      text-decoration: none;
+      font-size: 12px;
+    }
+
     .link-btn:hover {
       text-decoration: underline;
     }
 
-    .style-section {
-      margin-top: 10px;
-      padding-top: 6px;
-    }
-    .theme-select {
-      width: 100%;
-      padding: 6px;
-      border: 1px solid #d1d5db;
-      border-radius: 5px;
-      font-size: 12px;
-      margin-top: 6px;
-      outline: none;
-      background: #f9fafb;
-    }
-    .css-editor {
-      width: 100%;
-      height: 75px;
-      font-family: monospace;
+    /* 状态即时反馈提示文字 */
+    .status-tip {
       font-size: 11px;
-      padding: 6px;
-      margin-top: 6px;
-      border: 1px solid #d1d5db;
-      border-radius: 5px;
-      box-sizing: border-box;
-      resize: vertical;
-      background: #f8fafc;
-      color: #0f172a;
-    }
-    .btn-apply-css {
-      width: 100%;
-      margin-top: 6px;
-      padding: 5px;
-      background-color: #e0f2fe;
-      color: #0369a1;
-      border: 1px solid #bae6fd;
-      border-radius: 5px;
-      font-size: 12px;
-      cursor: pointer;
-      font-weight: 500;
-    }
-    .btn-apply-css:hover {
-      background-color: #bae6fd;
-    }
-
-    .btn-clear {
-      width: 100%;
-      margin-top: 10px;
-      padding: 7px;
-      background-color: #fee2e2;
-      color: #991b1b;
-      border: 1px solid #fca5a5;
-      border-radius: 6px;
-      font-size: 12px;
-      cursor: pointer;
-      font-weight: 500;
-    }
-    .btn-clear:hover {
-      background-color: #fecaca;
+      color: var(--text-muted);
+      text-align: center;
+      margin-top: 8px;
+      min-height: 16px;
+      transition: color 0.2s;
     }
   </style>
 </head>
 <body>
-  <h3>📖 Text Folder</h3>
 
-  <div class="option-row">
-    <span>启用插件功能</span>
-    <label class="switch">
-      <input type="checkbox" id="toggle-enabled" checked>
-      <span class="slider"></span>
-    </label>
+  <!-- 1. 顶部标题栏与快捷键配置跳转 -->
+  <div class="header">
+    <div class="title">
+      <span>📑</span> Text Folder
+    </div>
+    <a href="#" id="btn-config-shortcuts" class="link-btn">快捷键设置 ⚙️</a>
   </div>
 
-  <div class="option-row">
-    <span>设为折叠后立即收起</span>
-    <label class="switch">
-      <input type="checkbox" id="toggle-collapse-initially" checked>
-      <span class="slider"></span>
-    </label>
+  <!-- 2. 通用运行配置区块 -->
+  <div class="section">
+    <div class="section-title">通用设置</div>
+    
+    <!-- 开关：全局启用/禁用 -->
+    <div class="option-row">
+      <span>启用插件功能</span>
+      <label class="switch">
+        <input type="checkbox" id="chk-enabled" checked>
+        <span class="slider"></span>
+      </label>
+    </div>
+    
+    <!-- 开关：折叠初始状态 -->
+    <div class="option-row">
+      <span>创建时默认收起</span>
+      <label class="switch">
+        <input type="checkbox" id="chk-collapse-initially" checked>
+        <span class="slider"></span>
+      </label>
+    </div>
+    
+    <!-- 开关：持久化记忆 -->
+    <div class="option-row">
+      <span>自动记忆折叠状态 (刷新保留) <span class="tag-exp">*实验功能</span></span>
+      <label class="switch">
+        <input type="checkbox" id="chk-auto-save">
+        <span class="slider"></span>
+      </label>
+    </div>
   </div>
 
-  <div class="option-row">
-    <span>刷新自动恢复折叠<span style="color: #ef4444; font-size: 11px; margin-left: 2px;">(实验功能)</span></span>
-    <label class="switch">
-      <input type="checkbox" id="toggle-auto-save">
-      <span class="slider"></span>
-    </label>
+  <!-- 3. 外观主题与自定义 CSS 区块 -->
+  <div class="section">
+    <div class="section-title">折叠外观主题</div>
+    
+    <!-- 2x2 主题卡片网格 -->
+    <div class="theme-grid">
+      <div class="theme-card active" data-theme="blue">
+        <div class="theme-header">
+          <span>❄️</span>
+          <span>经典冰蓝</span>
+        </div>
+        <div class="theme-sub">(默认柔和)</div>
+      </div>
+      <div class="theme-card" data-theme="gray">
+        <div class="theme-header">
+          <span>🏢</span>
+          <span>暗灰极简</span>
+        </div>
+        <div class="theme-sub">(沉浸模式)</div>
+      </div>
+      <div class="theme-card" data-theme="green">
+        <div class="theme-header">
+          <span>🍃</span>
+          <span>护眼淡绿</span>
+        </div>
+        <div class="theme-sub">(夜间/阅读)</div>
+      </div>
+      <div class="theme-card" data-theme="gold">
+        <div class="theme-header">
+          <span>🌅</span>
+          <span>暖调柔金</span>
+        </div>
+        <div class="theme-sub">(复古羊皮纸)</div>
+      </div>
+    </div>
+
+    <!-- 二级折叠抽屉：自定义 CSS 高级注入 -->
+    <button id="btn-toggle-custom-css" class="custom-css-toggle">
+      <span>🎨</span> 自定义 CSS 高级样式 <span id="css-arrow">▼</span>
+    </button>
+    <div id="panel-custom-css" class="custom-css-panel">
+      <textarea id="txt-custom-css" class="css-textarea" placeholder="在此输入自定义 CSS 代码..."></textarea>
+      <button id="btn-apply-custom-css" class="btn btn-sm btn-accent">
+        <span>💾</span> 保存并应用自定义 CSS
+      </button>
+    </div>
   </div>
 
-  <div class="option-row">
-    <span>快捷键配置</span>
-    <a href="#" id="btn-config-shortcuts" class="link-btn">设置按键 ⚙️</a>
+  <!-- 4. 数据清理与重置管理区块 -->
+  <div class="section">
+    <div class="section-title">数据与重置管理</div>
+    <div class="btn-group">
+      <!-- 仅清空当前活跃 Tab 的折叠 -->
+      <button id="btn-clear-page-folds" class="btn btn-danger-light">
+        <span>🧹</span> 恢复本页排版 (清除当前页折叠)
+      </button>
+      <!-- 清空整个插件存储的跨站历史记录 -->
+      <button id="btn-clear-all-history" class="btn btn-danger-solid">
+        <span>🗑️</span> 清空全网记忆历史 (重置所有折叠数据)
+      </button>
+    </div>
+    <!-- 交互操作状态提示框 -->
+    <div id="status-tip" class="status-tip"></div>
   </div>
 
-  <div class="style-section">
-    <div style="font-size: 13px; font-weight: 500; color: #374151;">折叠框外观风格</div>
-    <select id="theme-preset" class="theme-select">
-      <option value="blue">❄️ 经典冰蓝 (默认柔和)</option>
-      <option value="gray">🔘 暗灰极简 (无感融合)</option>
-      <option value="green">🍃 护眼淡绿 (舒适阅读)</option>
-      <option value="yellow">📜 暖调柔金 (醒目高亮)</option>
-      <option value="custom">✏️ 自定义 CSS 样式...</option>
-    </select>
-    <textarea id="custom-css" class="css-editor" placeholder="在这里编写自定义 CSS 规则..."></textarea>
-    <button id="btn-save-css" class="btn-apply-css">保存并应用样式</button>
-  </div>
-
-  <button id="btn-clear-page" class="btn-clear">清空本页所有折叠区域</button>
-
+  <!-- 逻辑入口脚本 -->
   <script src="popup.js"></script>
 </body>
 </html>

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Text Folder - 网页文本折叠工具",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "一键折叠网页多余文字，收起不重要的内容，让阅读更清爽、更聚焦。",
   "permissions": [
     "contextMenus",
@@ -29,22 +29,20 @@
   },
   "commands": {
     "toggle-fold": {
-      "suggested_key": {
-        "default": "Alt+Q"
-      },
       "description": "设为折叠区域 / 切换展开收起"
     },
     "restore-fold": {
-      "suggested_key": {
-        "default": "Alt+W"
-      },
       "description": "取消折叠并还原"
     }
   },
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
-      "js": ["content.js"],
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "content.js"
+      ],
       "run_at": "document_end"
     }
   ]
