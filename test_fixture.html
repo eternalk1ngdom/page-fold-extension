@@ -251,12 +251,25 @@
 }</code></pre>
   </section>
 
-  <!-- 5. 纯白底色正文环境 (重点防范：黑字变白 bug) -->
+  <!-- 5. 纯白底色正文环境 (真实百度百科 1:1 独立段落对齐模拟) -->
   <section class="fixture-section mock-light-page" id="case-light-page">
-    <div class="fixture-title">5. 纯白底色正文 (百度百科/常规白底模拟) <span class="badge" style="background:#dcfce7; color:#166534;">色彩继承与高反差测试</span></div>
-    <div class="para-black">凯旋门（法语：Arc de triomphe de l'Étoile），位于法国巴黎的戴高乐广场中央，香榭丽舍大街的西端。</div>
-    <div class="para-black">该建筑始建于1806年，是拿破仑为纪念奥斯特利茨战役胜利而决定建造的，整座建筑由白色砂岩铸成。</div>
-    <div class="para-black">【断言目标】：在白底页面折叠后，正文字体应保持清晰黑色（#1f2937），按钮呈现深石板灰，绝不出现白字融入白底的现象。</div>
+    <div class="fixture-title">
+      <span>5. 纯白底色正文 (百度百科真实段落结构模拟)</span>
+      <span class="badge" style="background:#dcfce7; color:#166534;">色彩继承与高反差测试</span>
+    </div>
+    
+    <!-- 真实百度百科独立段落容器 (J-paragraph) -->
+    <div class="para-content-container" style="margin-top: 12px;">
+      <div class="para para-black">
+        凯旋门（法语：Arc de triomphe de l'Étoile），也称“星门”，位于法兰西共和国首都巴黎市中心城区香榭丽舍大街，地处巴黎戴高乐星形广场中央。
+      </div>
+      <div class="para para-black">
+        该建筑始建于1806年，是为颂扬奥斯特里茨战役胜利，由法兰西第一帝国皇帝拿破仑主持修建的一座纪念性建筑，是法国国家象征之一、法国四大代表建筑之一。
+      </div>
+      <div class="para para-black">
+        【断言目标】：在白底页面折叠后，正文字体应保持清晰黑色（#1f2937），按钮呈现深石板灰，绝不出现白字融入白底的现象。
+      </div>
+    </div>
   </section>
 
   <!-- 6. 不可折叠区域防护测试 -->
@@ -278,6 +291,17 @@
       &nbsp;&nbsp;&nbsp;&nbsp;这是包含连续空格和不规则换行的文本段落。
       <span>\t\t\t</span>折叠此段后刷新页面，验证坐标引擎是否能精准定位到首末字符，绝不产生偏移与消失。
       <span>[Anchor-End]</span>
+    </div>
+  </section>
+
+  <!-- 8. 跨段落连续折叠与独立无损复原 -->
+  <section class="fixture-section" id="case-cross-paragraph">
+    <div class="fixture-title">8. 跨段落连续折叠与独立无损复原 <span class="badge" style="background:#fef3c7; color:#b45309;">段落容器对齐测试</span></div>
+    <p style="font-size: 13.5px; color: #94a3b8; margin: 4px 0 10px;">测试连续折叠段落一与段落二后，单独取消段落二（或段落一），段落不会被吸入另一折叠块，取消后两段互不影响：</p>
+    <div class="para-content-container">
+      <div class="para" style="margin-bottom: 10px; color: #e2e8f0;">【测试段落一】这是第一段的完整文本内容，用于验证独立折叠与恢复。</div>
+      <div class="para" style="margin-bottom: 10px; color: #e2e8f0;">【测试段落二】这是第二段的完整文本内容，测试中间段落的独立性。</div>
+      <div class="para" style="color: #e2e8f0;">【测试段落三】这是第三段的完整文本内容，验证多段连续折叠与分别解包的边界。</div>
     </div>
   </section>
 

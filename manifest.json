@@ -41,9 +41,14 @@
         "<all_urls>"
       ],
       "js": [
-        "content.js"
+        "src/config.js",
+        "src/utils.js",
+        "src/state.js",
+        "src/persistence.js",
+        "src/dom-engine.js",
+        "src/app.js"
       ],
-      "run_at": "document_end"
+      "run_at": "document_idle"
     }
   ]
 }
