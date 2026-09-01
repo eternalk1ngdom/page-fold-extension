@@ -1,265 +1,507 @@
-// =============================================================================
-// 1. 配置与样式常量
-// =============================================================================
-
 /**
- * 插件运行时核心配置项
+ * Text Folder - Content Script
+ * 网页文本与代码块折叠拓展 (v1.0.2 - 经典高精度持久化记忆与无损复原修复版)
+ * 
+ * 核心设计：
+ * 1. 高精度字符坐标树对齐：彻底修复偏移量错位，精准复原百度百科与 AI 代码块多级递进折叠。
+ * 2. 语法高亮色彩完全隔离：锁定胶囊按钮独立中性色彩规范，杜绝继承 hljs-string/token 导致按钮被染色。
+ * 3. 宿主色彩全透传：正文折叠容器 100% 继承宿主网页文字原色，白底黑字黑底白字自适应。
+ * 4. 严格禁止嵌套折叠：折叠块内部彻底禁止再创建子折叠块，杜绝复杂 DOM 递归。
+ * 5. 内部操作事件阻断：通过 isInternalAction 锁彻底隔绝 DOM 操作引起的重扫描。
+ * 6. 物理坐标单轨对齐：基于 getBoundingClientRect 精准计算层级位移与首行去重。
+ * 7. 跨异构边界防御：检测并拦截跨代码块边界框选，杜绝撕裂。
  */
+
+// =============================================================================
+// 1. 全局配置与样式常量
+// =============================================================================
+
 const CONFIG = {
-  // DOM 折叠容器所用的 CSS 类名定义
   CLASSES: {
-    BLOCK: "tf-fold-block",       // 折叠块根容器
-    COLLAPSED: "is-collapsed",   // 折叠状态标记
-    HEADER: "tf-fold-header",     // 顶部操作栏
-    BTN: "tf-toggle-btn",         // 展开/收起切换按钮
-    BODY: "tf-fold-body",         // 折叠内容包裹体
-    FOLDED: "folded"              // 内容隐藏状态
+    BLOCK: "tf-fold-block",
+    COLLAPSED: "is-collapsed",
+    HEADER: "tf-fold-header",
+    BTN: "tf-toggle-btn",
+    BODY: "tf-fold-body",
+    FOLDED: "folded"
   },
-
-  // 用户默认配置
   DEFAULT_SETTINGS: {
-    isEnabled: true,              // 是否启用插件功能
-    collapseInitially: true,      // 创建折叠区域时是否默认收起
-    autoSave: false               // 是否开启页面折叠记忆（刷新后保留）
+    isEnabled: true,
+    collapseInitially: true,
+    autoSave: false
   },
-
-  // 单个浏览器存储历史记忆的最大页面数（超过后按 LRU 清理）
-  MAX_SAVED_PAGES: 500,
-
-  // 不允许注入折叠操作的黑名单选择器（编辑器、输入控件、富媒体与专用阅读器图层）
-  UNSAFE_SELECTORS: [
-    "input", "textarea", "select", "button", "canvas", "svg", "iframe",
-    "video", "audio", "[contenteditable='true']", ".monaco-editor",
-    ".cm-editor", ".ace_editor", ".textLayer", ".pdfViewer",
-    ".flowpdf", ".flowpdf-content", ".kns-reader", "[data-page-no]"
-  ].join(",")
+  TIMING: {
+    OBSERVER_DEBOUNCE: 180,
+    TYPING_LOCK: 1500,
+    URL_POLL_INTERVAL: 500,
+    RESTORE_DELAYS: [100, 400, 900, 1800, 3000]
+  },
+  UI: {
+    LEFT_HOTZONE_WIDTH: 14
+  },
+  SELECTORS: {
+    CODE: "pre, code, code-block, [class*='segment-code'], [class*='code-block'], [class*='code_block'], .md-code-block, .ds-code-box, .cm-content, .highlight",
+    TEXT: "p, div.ds-markdown-paragraph, div.para, [class*='para'], li, blockquote, h1, h2, h3, h4, h5, h6",
+    SAFE_EDITABLE: ".markdown, pre, code, code-block, .cm-content, message-content, [data-message-author-role], .ds-markdown, .model-response-text, .RichText",
+    UNSAFE: [
+      "canvas", "svg", "iframe", "video", "audio",
+      ".monaco-editor", ".ace_editor",
+      "#prompt-textarea",
+      "[data-writing-block-fullscreen-editor-region]",
+      "[role='textbox']",
+      "input", "textarea", "select"
+    ].join(",")
+  }
 };
 
-/**
- * 样式注入模板
- */
 const STYLES = {
-  // 核心功能性样式（保证折叠展开的基础布局与过渡）
   BASE: `
+    /* 核心折叠容器 (透传宿主文字颜色) */
     .${CONFIG.CLASSES.BLOCK} {
       display: block !important;
-      border-radius: 5px !important;
-      padding: 6px 10px !important;
+      border-radius: 6px !important;
+      padding: 6px 12px 8px ${CONFIG.UI.LEFT_HOTZONE_WIDTH}px !important;
       margin: 6px 0 !important;
       position: relative !important;
-      transition: all 0.2s ease !important;
+      box-sizing: border-box !important;
+      width: 100% !important;
+      clear: both !important;
+      background-color: rgba(59, 130, 246, 0.06) !important;
+      border-left: 3px solid #3b82f6 !important;
+      border-top: 1px dashed rgba(59, 130, 246, 0.2) !important;
+      border-right: 1px dashed rgba(59, 130, 246, 0.2) !important;
+      border-bottom: 1px dashed rgba(59, 130, 246, 0.2) !important;
+      color: inherit !important;
     }
-    .${CONFIG.CLASSES.BLOCK}.${CONFIG.CLASSES.COLLAPSED} { padding: 4px 10px !important; }
+
+    /* 代码块内部内嵌折叠 */
+    pre .${CONFIG.CLASSES.BLOCK},
+    code .${CONFIG.CLASSES.BLOCK},
+    code-block .${CONFIG.CLASSES.BLOCK},
+    div[class*="code"] .${CONFIG.CLASSES.BLOCK},
+    [class*="segment-code"] .${CONFIG.CLASSES.BLOCK},
+    .md-code-block .${CONFIG.CLASSES.BLOCK},
+    .ds-code-box .${CONFIG.CLASSES.BLOCK},
+    .cm-content .${CONFIG.CLASSES.BLOCK} {
+      width: calc(100% - var(--tf-indent-offset, 0px)) !important;
+      background-color: transparent !important;
+      border-top: none !important;
+      border-right: none !important;
+      border-bottom: none !important;
+      border-left: 2px solid rgba(59, 130, 246, 0.5) !important;
+      padding: 2px 0 2px 8px !important;
+      margin-top: 2px !important;
+      margin-bottom: 2px !important;
+      margin-right: 0 !important;
+      margin-left: var(--tf-indent-offset, 0px) !important;
+      box-shadow: none !important;
+      color: inherit !important;
+    }
+
+    /* 代码块内部收起态 */
+    pre .${CONFIG.CLASSES.BLOCK}.${CONFIG.CLASSES.COLLAPSED},
+    code .${CONFIG.CLASSES.BLOCK}.${CONFIG.CLASSES.COLLAPSED},
+    code-block .${CONFIG.CLASSES.BLOCK}.${CONFIG.CLASSES.COLLAPSED},
+    div[class*="code"] .${CONFIG.CLASSES.BLOCK}.${CONFIG.CLASSES.COLLAPSED},
+    [class*="segment-code"] .${CONFIG.CLASSES.BLOCK}.${CONFIG.CLASSES.COLLAPSED},
+    .md-code-block .${CONFIG.CLASSES.BLOCK}.${CONFIG.CLASSES.COLLAPSED},
+    .ds-code-box .${CONFIG.CLASSES.BLOCK}.${CONFIG.CLASSES.COLLAPSED} {
+      background-color: transparent !important;
+      border-left-color: #64748b !important;
+      padding: 1px 0 !important;
+      margin-top: 1px !important;
+      margin-bottom: 1px !important;
+      margin-right: 0 !important;
+      margin-left: var(--tf-indent-offset, 0px) !important;
+    }
+
+    /* 左侧边缘快捷交互热区 */
+    .${CONFIG.CLASSES.BLOCK}:not(.${CONFIG.CLASSES.COLLAPSED})::before {
+      content: "" !important;
+      position: absolute !important;
+      top: 0 !important;
+      left: -3px !important;
+      width: ${CONFIG.UI.LEFT_HOTZONE_WIDTH}px !important;
+      height: 100% !important;
+      cursor: pointer !important;
+      z-index: 15 !important;
+    }
+    .${CONFIG.CLASSES.BLOCK}:not(.${CONFIG.CLASSES.COLLAPSED}):hover {
+      border-left-color: #2563eb !important;
+    }
+
+    /* 正文紧凑收起态 */
+    .${CONFIG.CLASSES.BLOCK}.${CONFIG.CLASSES.COLLAPSED} {
+      padding: 2px 6px !important;
+      margin: 2px 0 !important;
+      background-color: rgba(100, 116, 139, 0.1) !important;
+      border-left-color: #64748b !important;
+    }
+    .${CONFIG.CLASSES.BLOCK}.${CONFIG.CLASSES.COLLAPSED} .${CONFIG.CLASSES.HEADER} {
+      margin-bottom: 0 !important;
+    }
+
+    /* 段落收起时间距消除 */
+    p:has(> .${CONFIG.CLASSES.BLOCK}.${CONFIG.CLASSES.COLLAPSED}),
+    div:has(> .${CONFIG.CLASSES.BLOCK}.${CONFIG.CLASSES.COLLAPSED}) {
+      margin-bottom: 2px !important;
+    }
+
+    /* 跨平台代码等宽字体栈与字号锁定 */
+    .${CONFIG.CLASSES.BODY} code,
+    .${CONFIG.CLASSES.BODY} pre,
+    .${CONFIG.CLASSES.BODY} code-block,
+    pre .${CONFIG.CLASSES.BODY},
+    .${CONFIG.CLASSES.BODY} div[class*="code"],
+    .${CONFIG.CLASSES.BODY} [class*="segment-code"],
+    .${CONFIG.CLASSES.BODY} .md-code-block,
+    .${CONFIG.CLASSES.BODY} .ds-code-box,
+    .${CONFIG.CLASSES.BODY} .cm-content {
+      font-family: "Google Sans Code", "Roboto Mono", "Fira Code", "Fira Mono", Menlo, Monaco, Consolas, "Cascadia Mono", "Ubuntu Mono", "DejaVu Sans Mono", "Liberation Mono", "JetBrains Mono", monospace !important;
+      font-size: 12.5px !important;
+      line-height: 1.6 !important;
+    }
+
+    .${CONFIG.CLASSES.BODY} pre *,
+    .${CONFIG.CLASSES.BODY} code *,
+    .${CONFIG.CLASSES.BODY} code-block *,
+    .${CONFIG.CLASSES.BODY} div[class*="code"] *,
+    .${CONFIG.CLASSES.BODY} [class*="segment-code"] *,
+    .${CONFIG.CLASSES.BODY} .md-code-block *,
+    .${CONFIG.CLASSES.BODY} .ds-code-box * {
+      font-family: inherit !important;
+      font-size: inherit !important;
+      line-height: inherit !important;
+    }
+
+    .${CONFIG.CLASSES.BODY} pre,
+    .${CONFIG.CLASSES.BODY} code-block,
+    .${CONFIG.CLASSES.BODY} div[class*="code"],
+    .${CONFIG.CLASSES.BODY} [class*="segment-code"],
+    .${CONFIG.CLASSES.BODY} .md-code-block,
+    .${CONFIG.CLASSES.BODY} .ds-code-box,
+    pre .${CONFIG.CLASSES.BODY} {
+      white-space: pre-wrap !important;
+      word-break: break-word !important;
+    }
+
+    /* 行内代码独立边距保护 */
+    .${CONFIG.CLASSES.BODY} p > code,
+    .${CONFIG.CLASSES.BODY} li > code,
+    .${CONFIG.CLASSES.BODY} span > code {
+      display: inline-block !important;
+      white-space: normal !important;
+      padding: 0.15em 0.35em !important;
+      font-size: 0.9em !important;
+    }
+
+    /* 内部 UI 控制组件：标准中性色定义，拒绝继承高亮色 */
     .${CONFIG.CLASSES.HEADER} {
       display: flex !important;
       align-items: center !important;
       user-select: none !important;
+      -webkit-user-select: none !important;
       margin-bottom: 4px !important;
     }
-    .${CONFIG.CLASSES.BLOCK}.${CONFIG.CLASSES.COLLAPSED} .${CONFIG.CLASSES.HEADER} { margin-bottom: 0 !important; }
+
     .${CONFIG.CLASSES.BTN} {
       cursor: pointer !important;
       font-size: 12px !important;
-      font-family: inherit !important;
+      line-height: 1.2 !important;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+      font-weight: 500 !important;
       padding: 2px 8px !important;
       border-radius: 4px !important;
       display: inline-flex !important;
       align-items: center !important;
-      gap: 4px !important;
-      transition: background 0.15s ease !important;
+      gap: 5px !important;
+      border: 1px solid rgba(125, 125, 125, 0.3) !important;
+      background: rgba(125, 125, 125, 0.15) !important;
+      color: #334155 !important;
+      opacity: 0.95 !important;
+      position: relative !important;
+      z-index: 10 !important;
+      pointer-events: auto !important;
+      transition: all 0.15s ease !important;
+      text-decoration: none !important;
+      font-style: normal !important;
     }
-    .${CONFIG.CLASSES.BODY}.${CONFIG.CLASSES.FOLDED} { display: none !important; }
-    .${CONFIG.CLASSES.BODY} { display: block !important; }
-  `,
+    .${CONFIG.CLASSES.BTN} * {
+      color: inherit !important;
+      font-style: normal !important;
+    }
+    .${CONFIG.CLASSES.BTN}:hover {
+      background: rgba(125, 125, 125, 0.25) !important;
+      opacity: 1 !important;
+    }
 
-  // 默认主题样式（经典冰蓝）
-  FALLBACK_BLUE: `
-    .${CONFIG.CLASSES.BLOCK} {
-      background-color: rgba(239, 246, 255, 0.85) !important;
-      border-left: 4px solid #3b82f6 !important;
-      border-top: 1px dashed #bfdbfe !important;
-      border-right: 1px dashed #bfdbfe !important;
-      border-bottom: 1px dashed #bfdbfe !important;
+    /* 代码块与语法高亮容器内：强制锁定浅白灰中性色，彻底隔绝高亮标签颜色穿透 */
+    pre .${CONFIG.CLASSES.BTN},
+    code .${CONFIG.CLASSES.BTN},
+    code-block .${CONFIG.CLASSES.BTN},
+    div[class*="code"] .${CONFIG.CLASSES.BTN},
+    [class*="segment-code"] .${CONFIG.CLASSES.BTN},
+    .md-code-block .${CONFIG.CLASSES.BTN},
+    .ds-code-box .${CONFIG.CLASSES.BTN},
+    .cm-content .${CONFIG.CLASSES.BTN},
+    [class*="hljs"] .${CONFIG.CLASSES.BTN},
+    [class*="token"] .${CONFIG.CLASSES.BTN} {
+      color: #e2e8f0 !important;
+      background: rgba(255, 255, 255, 0.12) !important;
+      border-color: rgba(255, 255, 255, 0.2) !important;
     }
-    .${CONFIG.CLASSES.BLOCK}.${CONFIG.CLASSES.COLLAPSED} {
-      background-color: rgba(241, 245, 249, 0.95) !important;
-      border-left: 4px solid #64748b !important;
-      border-top: 1px solid #cbd5e1 !important;
-      border-right: 1px solid #cbd5e1 !important;
-      border-bottom: 1px solid #cbd5e1 !important;
+    pre .${CONFIG.CLASSES.BTN}:hover,
+    code .${CONFIG.CLASSES.BTN}:hover,
+    code-block .${CONFIG.CLASSES.BTN}:hover,
+    div[class*="code"] .${CONFIG.CLASSES.BTN}:hover,
+    [class*="segment-code"] .${CONFIG.CLASSES.BTN}:hover,
+    .md-code-block .${CONFIG.CLASSES.BTN}:hover,
+    .ds-code-box .${CONFIG.CLASSES.BTN}:hover {
+      background: rgba(255, 255, 255, 0.2) !important;
     }
-    .${CONFIG.CLASSES.BTN} {
-      border: 1px solid #93c5fd !important;
-      background: #dbeafe !important;
-      color: #1e40af !important;
+
+    .${CONFIG.CLASSES.BODY}.${CONFIG.CLASSES.FOLDED} { display: none !important; }
+    
+    .${CONFIG.CLASSES.BODY} {
+      display: block !important;
+      margin-top: 4px !important;
+      color: inherit !important;
     }
-    .${CONFIG.CLASSES.BTN}:hover { background: #bfdbfe !important; }
+
+    /* 暗色模式媒体查询 */
+    @media (prefers-color-scheme: dark) {
+      .${CONFIG.CLASSES.BLOCK} {
+        background-color: rgba(255, 255, 255, 0.04) !important;
+        border-left: 3px solid #60a5fa !important;
+        border-top: 1px solid rgba(255, 255, 255, 0.1) !important;
+        border-right: 1px solid rgba(255, 255, 255, 0.1) !important;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1) !important;
+      }
+      .${CONFIG.CLASSES.BLOCK}.${CONFIG.CLASSES.COLLAPSED} {
+        background-color: rgba(0, 0, 0, 0.3) !important;
+        border-left: 3px solid #94a3b8 !important;
+      }
+      .${CONFIG.CLASSES.BLOCK}:not(.${CONFIG.CLASSES.COLLAPSED}):hover {
+        border-left-color: #93c5fd !important;
+      }
+      .${CONFIG.CLASSES.BTN} {
+        color: #e2e8f0 !important;
+        background: rgba(255, 255, 255, 0.12) !important;
+        border-color: rgba(255, 255, 255, 0.2) !important;
+      }
+      .${CONFIG.CLASSES.BTN}:hover {
+        background: rgba(255, 255, 255, 0.2) !important;
+      }
+    }
+
+    /* 列表边距保护 */
+    .${CONFIG.CLASSES.BODY} li { margin-left: 1.8em !important; padding-left: 0.2em !important; list-style-position: outside !important; }
+    .${CONFIG.CLASSES.BODY} ol, .${CONFIG.CLASSES.BODY} ul { padding-left: 1.8em !important; margin: 4px 0 !important; }
+    .${CONFIG.CLASSES.BODY} > *:first-child { margin-top: 0 !important; }
+    .${CONFIG.CLASSES.BODY} > *:last-child { margin-bottom: 0 !important; }
   `
 };
 
 // =============================================================================
-// 2. 工具与 Chrome Storage Promise 封装
+// 2. 通用工具库
 // =============================================================================
 
 const Utils = {
-  /**
-   * 获取安全的 Element 节点（若传入为 TextNode 则返回其父级 Element）
-   */
-  getSafeElement(target) {
-    if (!target) return null;
-    return target.nodeType === Node.ELEMENT_NODE ? target : target.parentElement || null;
-  },
+  getSafeElement: (node) => (!node ? null : (node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement || null)),
 
-  /**
-   * 异步获取 Storage 本地配置
-   */
+  cleanText: (str) => (str || "").replace(/\u00a0/g, " ").replace(/[ \t\r\n]+/g, " ").trim(),
+
   async getStorage(keys) {
     if (!chrome.runtime?.id) return {};
-    return new Promise((resolve) => {
-      chrome.storage.local.get(keys, (res) => resolve(chrome.runtime.lastError ? {} : res));
-    });
+    return new Promise(resolve => chrome.storage.local.get(keys, res => resolve(chrome.runtime.lastError ? {} : res)));
   },
 
-  /**
-   * 异步设置 Storage 本地配置
-   */
   async setStorage(items) {
     if (!chrome.runtime?.id) return;
-    return new Promise((resolve) => {
-      chrome.storage.local.set(items, resolve);
-    });
+    return new Promise(resolve => chrome.storage.local.set(items, resolve));
   },
 
-  /**
-   * 异步删除 Storage 键名
-   */
   async removeStorage(keys) {
     if (!chrome.runtime?.id) return;
-    return new Promise((resolve) => {
-      chrome.storage.local.remove(keys, resolve);
-    });
+    return new Promise(resolve => chrome.storage.local.remove(keys, resolve));
   },
 
-  /**
-   * 发送运行时安全消息（捕获扩展上下文失效异常）
-   */
   sendMessage(msg) {
     if (!chrome.runtime?.id) return;
-    try {
-      chrome.runtime.sendMessage(msg, () => {
-        if (chrome.runtime.lastError) {}
-      });
-    } catch (e) {}
+    try { chrome.runtime.sendMessage(msg, () => chrome.runtime.lastError); } catch (e) {}
   }
 };
 
 // =============================================================================
-// 3. 用户交互状态中心
+// 3. 全局交互状态
 // =============================================================================
 
-/**
- * 维护当前前台交互时的全局临时上下文
- */
 const UIState = {
-  rightClickedElement: null, // 用户最后一次右键点击的目标节点
-  lastHoveredElement: null,  // 鼠标最后滑过的目标节点（快捷键还原备选点）
-  cachedRange: null,         // 缓存的有效选区对象
+  rightClickedElement: null,
+  lastHoveredElement: null,
+  cachedRange: null,
+  isSendingMessage: false,
+  isInternalAction: false,
 
   clearSelectionCache() {
     this.cachedRange = null;
+  },
+
+  lockTyping() {
+    this.isSendingMessage = true;
+    setTimeout(() => { this.isSendingMessage = false; }, CONFIG.TIMING.TYPING_LOCK);
   }
 };
 
 // =============================================================================
-// 4. DOM 操作与选区安全引擎
+// 4. DOM 提取与折叠结构引擎
 // =============================================================================
 
 const DOMEngine = {
-  /**
-   * 校验节点是否位于不可折叠区域（黑名单选择器、不可选文本、绝对定位层等）
-   */
   isNodeUnsafe(node) {
     if (!node) return true;
     const el = Utils.getSafeElement(node);
     if (!el) return true;
 
-    // 1. 命中黑名单标签或容器
-    if (el.closest?.(CONFIG.UNSAFE_SELECTORS)) return true;
-
-    // 2. 检查 CSS 特殊属性限制
-    try {
-      const style = window.getComputedStyle(el);
-      if (style.userSelect === "none") return true;
-
-      // 避免破坏 PDF 选区或绝对定位图层
-      const isAbsPos = style.position === "absolute" || style.position === "fixed";
-      if (isAbsPos && (el.classList.contains("textLayer") || el.parentElement?.classList.contains("textLayer"))) {
-        return true;
-      }
-    } catch (e) {}
-
+    if (el.matches?.("input, textarea, select")) return true;
+    if (el.closest?.(CONFIG.SELECTORS.UNSAFE)) return true;
+    if (el.isContentEditable && el === document.activeElement && !el.closest(CONFIG.SELECTORS.SAFE_EDITABLE)) return true;
+    try { if (window.getComputedStyle(el).userSelect === "none") return true; } catch (e) {}
     return false;
   },
 
-  /**
-   * 校验选区 (Range) 的有效性与安全性
-   */
-  isSelectionSafe(range) {
+  isCrossBoundarySelection(range) {
     if (!range || range.collapsed) return false;
-    if (range.toString().trim().length < 2) return false; // 忽略单个无意义字符
 
-    // 起止节点必须安全
+    const startEl = Utils.getSafeElement(range.startContainer);
+    const endEl = Utils.getSafeElement(range.endContainer);
+    if (!startEl || !endEl) return false;
+
+    return startEl.closest(CONFIG.SELECTORS.CODE) !== endEl.closest(CONFIG.SELECTORS.CODE);
+  },
+
+  isSelectionSafe(range) {
+    if (!range || range.toString().trim().length < 1) return false;
     if (this.isNodeUnsafe(range.startContainer) || this.isNodeUnsafe(range.endContainer)) return false;
 
-    // 公共祖先必须安全
+    const startEl = Utils.getSafeElement(range.startContainer);
+    const endEl = Utils.getSafeElement(range.endContainer);
     const ancestorEl = Utils.getSafeElement(range.commonAncestorContainer);
+
+    // 严禁嵌套约束
+    if (startEl?.closest(`.${CONFIG.CLASSES.BLOCK}`) || endEl?.closest(`.${CONFIG.CLASSES.BLOCK}`) || ancestorEl?.closest(`.${CONFIG.CLASSES.BLOCK}`)) {
+      return false;
+    }
+
     if (ancestorEl && this.isNodeUnsafe(ancestorEl)) return false;
 
-    // 禁止跨越表格 (Table) 结构造成 DOM 解析错乱
-    const startTable = Utils.getSafeElement(range.startContainer)?.closest?.("table");
-    const endTable = Utils.getSafeElement(range.endContainer)?.closest?.("table");
-    return startTable === endTable;
+    if (startEl?.closest?.("table") !== endEl?.closest?.("table")) return false;
+
+    return !this.isCrossBoundarySelection(range);
   },
 
-  /**
-   * 检查节点是否已经处于折叠块内部
-   */
-  isInsideFoldBlock(node) {
-    if (!node) return false;
-    return Boolean(Utils.getSafeElement(node)?.closest?.(`.${CONFIG.CLASSES.BLOCK}`));
-  },
+  calculateVisualOffset(range) {
+    try {
+      const startEl = Utils.getSafeElement(range.startContainer);
+      const codeBox = startEl?.closest(CONFIG.SELECTORS.CODE);
+      if (!codeBox) return 0;
 
-  /**
-   * 防止折叠块嵌套与交叉重叠
-   */
-  rangeOverlapsFoldBlock(range) {
-    if (!range) return true;
-    if (this.isInsideFoldBlock(range.startContainer) || this.isInsideFoldBlock(range.endContainer)) return true;
+      const codeRect = codeBox.getBoundingClientRect();
+      const rangeRects = range.getClientRects();
+      const firstRect = rangeRects.length > 0 ? rangeRects[0] : range.getBoundingClientRect();
 
-    const element = Utils.getSafeElement(range.commonAncestorContainer);
-    if (element && element.closest?.(`.${CONFIG.CLASSES.BLOCK}`)) return true;
+      const paddingLeft = parseFloat(window.getComputedStyle(codeBox).paddingLeft) || 0;
 
-    if (element) {
-      const existingFolds = element.querySelectorAll(`.${CONFIG.CLASSES.BLOCK}`);
-      for (const fold of existingFolds) {
-        if (range.intersectsNode(fold)) return true;
+      if (firstRect && firstRect.left > 0) {
+        const visualDiff = firstRect.left - (codeRect.left + paddingLeft);
+        if (visualDiff > 3) return Math.round(visualDiff);
       }
+      return 0;
+    } catch (e) {
+      return 0;
     }
-    return false;
   },
 
-  /**
-   * 创建折叠组件的 DOM 框架 (Wrapper + Header + Body)
-   */
-  buildFoldUI(isCollapsed) {
+  smartSniffTargetRange(customTargetEl, cachedSelection) {
+    if (cachedSelection && this.isSelectionSafe(cachedSelection)) return cachedSelection;
+
+    const targetNode = customTargetEl || UIState.rightClickedElement || UIState.lastHoveredElement;
+    if (!targetNode) return null;
+
+    const el = Utils.getSafeElement(targetNode);
+    if (!el || this.isNodeUnsafe(el) || el.closest(`.${CONFIG.CLASSES.BLOCK}`)) return null;
+
+    const targetBlock = el.closest(CONFIG.SELECTORS.CODE) || el.closest(CONFIG.SELECTORS.TEXT);
+    if (targetBlock && !this.isNodeUnsafe(targetBlock) && !targetBlock.closest(`.${CONFIG.CLASSES.BLOCK}`)) {
+      try {
+        const autoRange = document.createRange();
+        autoRange.selectNode(targetBlock);
+        if (this.isSelectionSafe(autoRange)) return autoRange;
+      } catch (e) {}
+    }
+    return null;
+  },
+
+  expandRangeToEnclosingBlocks(range, isManualSelection = false) {
+    try {
+      const startEl = Utils.getSafeElement(range.startContainer);
+      const endEl = Utils.getSafeElement(range.endContainer);
+
+      // 手动框选或恢复时保持精确选区，不向外扩展
+      if (isManualSelection) return range;
+
+      if (startEl === endEl && (startEl?.matches?.(CONFIG.SELECTORS.TEXT) || startEl?.matches?.(CONFIG.SELECTORS.CODE))) {
+        return range;
+      }
+
+      const commonAncestor = range.commonAncestorContainer.nodeType === Node.ELEMENT_NODE
+        ? range.commonAncestorContainer
+        : range.commonAncestorContainer.parentElement;
+
+      const singleBlock = commonAncestor?.closest?.(CONFIG.SELECTORS.TEXT) || commonAncestor?.closest?.(CONFIG.SELECTORS.CODE);
+      if (singleBlock && !singleBlock.closest(`.${CONFIG.CLASSES.BLOCK}`)) {
+        const expanded = range.cloneRange();
+        expanded.selectNode(singleBlock);
+        return expanded;
+      }
+
+      const getTopChild = (node, ancestor) => {
+        let curr = Utils.getSafeElement(node);
+        if (!curr || !ancestor || curr === ancestor) return curr;
+        while (curr && curr.parentElement && curr.parentElement !== ancestor && curr.parentElement !== document.body) {
+          curr = curr.parentElement;
+        }
+        return curr;
+      };
+
+      const startTop = getTopChild(startEl, commonAncestor);
+      const endTop = getTopChild(endEl, commonAncestor);
+
+      if (startTop && endTop && startTop !== commonAncestor && endTop !== commonAncestor && startTop.parentElement === endTop.parentElement) {
+        const expanded = range.cloneRange();
+        expanded.setStartBefore(startTop);
+        expanded.setEndAfter(endTop);
+        return expanded;
+      }
+    } catch (e) {}
+    return range;
+  },
+
+  buildFoldUI(isCollapsed, foldId, indentOffsetPx = 0) {
     const wrapper = document.createElement("div");
     wrapper.className = CONFIG.CLASSES.BLOCK;
+    wrapper.dataset.tfId = foldId || ("tf_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7));
+
+    if (indentOffsetPx > 0) {
+      wrapper.style.setProperty("--tf-indent-offset", `${indentOffsetPx}px`);
+    }
 
     const header = document.createElement("div");
     header.className = CONFIG.CLASSES.HEADER;
 
     const toggleBtn = document.createElement("button");
     toggleBtn.className = CONFIG.CLASSES.BTN;
+    toggleBtn.type = "button";
 
     const body = document.createElement("div");
     body.className = CONFIG.CLASSES.BODY;
@@ -274,533 +516,476 @@ const DOMEngine = {
 
     header.appendChild(toggleBtn);
     wrapper.appendChild(header);
-    return { wrapper, header, toggleBtn, body };
+    return { wrapper, header, toggleBtn, body, foldId: wrapper.dataset.tfId };
   },
 
-  /**
-   * 清理提取内容后在父级遗留的幽灵空白段落
-   */
-  cleanEmptyGhostParagraphs(container) {
-    if (!container || container === document.body) return;
-    const blocks = container.querySelectorAll("p, div.para, .para, div");
-    blocks.forEach((el) => {
-      if (!el.classList.contains(CONFIG.CLASSES.BLOCK) && !el.closest(`.${CONFIG.CLASSES.BLOCK}`)) {
-        if (!el.innerHTML.trim() || !el.textContent.trim()) el.remove();
+  cleanEmptyGhostNodes(wrapper) {
+    if (!wrapper || !wrapper.parentElement || wrapper.closest(CONFIG.SELECTORS.CODE)) return;
+
+    const isEffectivelyEmpty = (node) => {
+      if (!node || node.nodeType !== Node.ELEMENT_NODE) return false;
+      if (node.classList.contains(CONFIG.CLASSES.BLOCK) || node.querySelector(`.${CONFIG.CLASSES.BLOCK}`)) return false;
+      if (node.querySelector("img, video, canvas, svg, input, button, textarea, br, hr")) return false;
+      return (node.textContent || "").trim().length === 0;
+    };
+
+    ["nextElementSibling", "previousElementSibling"].forEach(dir => {
+      let target = wrapper[dir];
+      while (target && isEffectivelyEmpty(target)) {
+        const toRemove = target;
+        target = target[dir];
+        toRemove.remove();
       }
     });
   },
 
-  /**
-   * 将选区内容提取并转化为可折叠容器
-   */
-  createFoldFromRange(range, isCollapsed = true) {
-    if (!range || !this.isSelectionSafe(range) || this.rangeOverlapsFoldBlock(range)) return null;
+  trimLeadingWhitespace(fragment) {
+    let curr = fragment.firstChild;
+    while (curr) {
+      if (curr.nodeType === Node.TEXT_NODE) {
+        if (/^[ \t\u00a0]+/.test(curr.textContent)) {
+          curr.textContent = curr.textContent.replace(/^[ \t\u00a0]+/, "");
+        }
+        if (curr.textContent.length > 0) break;
+      } else if (curr.nodeType === Node.ELEMENT_NODE && curr.firstChild) {
+        this.trimLeadingWhitespace(curr);
+        if (curr.textContent.trim().length > 0) break;
+      }
+      curr = curr.nextSibling;
+    }
+  },
 
-    const { wrapper, body } = this.buildFoldUI(isCollapsed);
+  createFoldFromRange(rawRange, isCollapsed = true, presetId = null, isManualSelection = false) {
+    const range = this.expandRangeToEnclosingBlocks(rawRange, isManualSelection);
+    if (!range || !this.isSelectionSafe(range)) return null;
+
+    UIState.isInternalAction = true;
     try {
-      const parentContainer = range.commonAncestorContainer.nodeType === Node.ELEMENT_NODE
-        ? range.commonAncestorContainer
-        : range.commonAncestorContainer.parentElement;
+      const indentOffsetPx = this.calculateVisualOffset(range);
+      const exact = Utils.cleanText(range.toString());
+      const { wrapper, body, foldId } = this.buildFoldUI(isCollapsed, presetId, indentOffsetPx);
 
-      // 提取选区内的 DOM 片段
       const extracted = range.extractContents();
       if (!extracted.textContent?.trim()) {
-        range.insertNode(extracted); // 无文本时回滚
+        range.insertNode(extracted);
         return null;
+      }
+
+      if (indentOffsetPx > 0) {
+        this.trimLeadingWhitespace(extracted);
       }
 
       body.appendChild(extracted);
       wrapper.appendChild(body);
-      range.insertNode(wrapper); // 插入包装后的折叠块
+      range.insertNode(wrapper);
 
-      this.cleanEmptyGhostParagraphs(parentContainer);
+      this.cleanEmptyGhostNodes(wrapper);
+      PersistenceManager.registerFoldRecord(foldId, { id: foldId, exact, isCollapsed, indentOffsetPx });
+      return wrapper;
     } catch (err) {
       return null;
+    } finally {
+      setTimeout(() => { UIState.isInternalAction = false; }, 50);
     }
-    return wrapper;
   },
 
-  /**
-   * 还原折叠块：解包并无痕归还原生 DOM
-   */
   restoreFold(wrapper) {
     if (!wrapper) return;
+    UIState.isInternalAction = true;
     try {
       const target = wrapper.closest(`.${CONFIG.CLASSES.BLOCK}`) || wrapper;
       const body = target.querySelector(`.${CONFIG.CLASSES.BODY}`);
       const parent = target.parentNode;
 
       if (body && parent) {
-        // 将 Body 中的全部子节点插回到原生父容器中
+        const frag = document.createDocumentFragment();
         while (body.firstChild) {
-          parent.insertBefore(body.firstChild, target);
+          frag.appendChild(body.firstChild);
         }
+        parent.insertBefore(frag, target);
         parent.removeChild(target);
-        parent.normalize(); // 合并碎裂的文本节点
-        PersistenceManager.savePageState(); // 同步更新持久化状态
+        PersistenceManager.removeFoldRecord(target.dataset.tfId);
       }
-    } catch (e) {}
-  }
-};
-
-// =============================================================================
-// 5. 字符流锚点与状态持久化引擎
-// =============================================================================
-
-const PersistenceManager = {
-  /**
-   * 生成当前页面专属的 Storage 存储 Key（忽略 Hash 与 Query 参数）
-   */
-  getStorageKey() {
-    const url = new URL(window.location.href);
-    return "tf_store_" + url.origin + decodeURIComponent(url.pathname);
+    } catch (e) {} finally {
+      setTimeout(() => { UIState.isInternalAction = false; }, 50);
+    }
   },
 
-  /**
-   * 构建整页纯文本流与 DOM TextNode 映射表（用于精准脱离 CSS 路径的文本定位）
-   */
-  getTextStream(includeFoldBodies = true) {
-    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
-      acceptNode(node) {
-        // 排除脚本、样式及内部操作按钮文本
-        if (node.parentElement?.closest?.(`script, style, noscript, textarea, [data-page-no]`)) {
-          return NodeFilter.FILTER_REJECT;
-        }
-        if (node.parentElement?.closest?.(`.${CONFIG.CLASSES.HEADER}`)) {
-          return NodeFilter.FILTER_REJECT;
-        }
-        if (!includeFoldBodies && node.parentElement?.closest?.(`.${CONFIG.CLASSES.BLOCK}`)) {
-          return NodeFilter.FILTER_REJECT;
-        }
-        return NodeFilter.FILTER_ACCEPT;
-      }
-    });
-
-    let text = "";
-    const charMap = []; // 字符流索引 -> { node: DOMTextNode, offset: 节点内偏移, foldBlock }
-    let node;
-
-    while ((node = walker.nextNode())) {
-      const raw = node.textContent;
-      const foldBlock = node.parentElement?.closest?.(`.${CONFIG.CLASSES.BLOCK}`);
-      for (let i = 0; i < raw.length; i++) {
-        const ch = raw[i];
-        // 压缩连续空格以抵御 HTML 渲染差异
-        if (/\s/.test(ch)) {
-          if (text.length === 0 || text[text.length - 1] !== " ") {
-            text += " ";
-            charMap.push({ node, offset: i, foldBlock });
-          }
-        } else {
-          text += ch;
-          charMap.push({ node, offset: i, foldBlock });
-        }
-      }
-    }
-    return { text, charMap };
-  },
-
-  /**
-   * 三元上下文特征加权匹配算法（Prefix + Exact + Suffix）
-   * 即使文本内部发生微小变动或排版调整，也能依托上下文精准锚定
-   */
-  findBestAnchorMatch(fullText, exact, prefix, suffix) {
-    if (!exact) return null;
-
-    let matches = [];
-    let pos = fullText.indexOf(exact);
-    let matchLen = exact.length;
-
-    // 阶段 1：完全精准匹配
-    while (pos !== -1) {
-      matches.push(pos);
-      pos = fullText.indexOf(exact, pos + 1);
-    }
-
-    // 阶段 2：模糊匹配降级策略（头部与尾部双锚点探测）
-    if (matches.length === 0 && exact.length > 20) {
-      const head = exact.slice(0, 15);
-      const tail = exact.slice(-15);
-      let hPos = fullText.indexOf(head);
-      while (hPos !== -1) {
-        const estimatedTailPos = fullText.indexOf(tail, hPos);
-        if (estimatedTailPos !== -1 && (estimatedTailPos - hPos) < exact.length * 1.5) {
-          matches.push(hPos);
-          matchLen = (estimatedTailPos + tail.length) - hPos;
-        }
-        hPos = fullText.indexOf(head, hPos + 1);
-      }
-    }
-
-    if (matches.length === 0) return null;
-
-    let bestMatch = null;
-    let highestScore = -1;
-
-    // 阶段 3：计算上下文环境得分（加权前缀和后缀吻合度）
-    for (const startIdx of matches) {
-      let score = 0;
-      const endIdx = startIdx + matchLen;
-
-      if (prefix) {
-        const textBefore = fullText.slice(Math.max(0, startIdx - prefix.length - 15), startIdx);
-        if (textBefore.includes(prefix)) score += 50;
-      } else {
-        score += 10;
-      }
-
-      if (suffix) {
-        const textAfter = fullText.slice(endIdx, Math.min(fullText.length, endIdx + suffix.length + 15));
-        if (textAfter.includes(suffix)) score += 50;
-      } else {
-        score += 10;
-      }
-
-      if (score > highestScore) {
-        highestScore = score;
-        bestMatch = { start: startIdx, end: Math.min(fullText.length, endIdx) };
-      }
-    }
-    return bestMatch;
-  },
-
-  /**
-   * 保存当前页面折叠状态到本地缓存
-   */
-  async savePageState() {
-    const res = await Utils.getStorage({ autoSave: CONFIG.DEFAULT_SETTINGS.autoSave });
-    if (!res?.autoSave) return;
-
-    const wrappers = Array.from(document.querySelectorAll(`.${CONFIG.CLASSES.BLOCK}`));
-    const key = this.getStorageKey();
-
-    if (wrappers.length === 0) {
-      await Utils.removeStorage(key);
-      return;
-    }
-
-    const { text, charMap } = this.getTextStream(true);
-    const records = [];
-
-    wrappers.forEach((w) => {
-      let startIdx = -1;
-      let endIdx = -1;
-
-      for (let i = 0; i < charMap.length; i++) {
-        if (charMap[i].foldBlock === w) {
-          if (startIdx === -1) startIdx = i;
-          endIdx = i;
-        }
-      }
-
-      if (startIdx !== -1 && endIdx !== -1) {
-        const exact = text.slice(startIdx, endIdx + 1).trim();
-        if (exact.length >= 2) {
-          const prefix = text.slice(Math.max(0, startIdx - 35), startIdx).trim();
-          const suffix = text.slice(endIdx + 1, Math.min(text.length, endIdx + 1 + 35)).trim();
-          const body = w.querySelector(`.${CONFIG.CLASSES.BODY}`);
-
-          records.push({
-            prefix,
-            exact,
-            suffix,
-            isCollapsed: body ? body.classList.contains(CONFIG.CLASSES.FOLDED) : true
-          });
-        }
-      }
-    });
-
-    if (records.length === 0) {
-      await Utils.removeStorage(key);
-      return;
-    }
-
-    // LRU 淘汰检查：确保数据条目不超过限制
-    const allData = await Utils.getStorage(null);
-    const storeEntries = Object.entries(allData)
-      .filter(([k]) => k.startsWith("tf_store_"))
-      .map(([k, val]) => ({ key: k, updatedAt: val?.updatedAt || 0 }));
-
-    if (storeEntries.length >= CONFIG.MAX_SAVED_PAGES) {
-      storeEntries.sort((a, b) => a.updatedAt - b.updatedAt);
-      const keysToRemove = storeEntries
-        .slice(0, storeEntries.length - CONFIG.MAX_SAVED_PAGES + 1)
-        .map((item) => item.key);
-      await Utils.removeStorage(keysToRemove);
-    }
-
-    await Utils.setStorage({ [key]: { updatedAt: Date.now(), data: records } });
-  },
-
-  /**
-   * 从缓存中重放并恢复页面的折叠状态
-   */
-  async restorePageState() {
-    const settings = await Utils.getStorage(CONFIG.DEFAULT_SETTINGS);
-    if (!settings?.isEnabled || !settings?.autoSave) return;
-
-    const key = this.getStorageKey();
-    const data = await Utils.getStorage([key]);
-    const payload = data[key];
-    const records = Array.isArray(payload) ? payload : payload?.data;
-    if (!records?.length) return;
-
-    // 1. 在干净的 DOM 树上提取文本映射表
-    const { text, charMap } = this.getTextStream(false);
-    const plannedTasks = [];
-
-    records.forEach((rec) => {
-      const match = this.findBestAnchorMatch(text, rec.exact, rec.prefix, rec.suffix);
-      if (match && match.start < charMap.length && match.end <= charMap.length) {
-        const startChar = charMap[match.start];
-        const endChar = charMap[match.end - 1];
-
-        if (startChar && endChar) {
-          try {
-            const range = document.createRange();
-            range.setStart(startChar.node, startChar.offset);
-            range.setEnd(endChar.node, endChar.offset + 1);
-
-            if (DOMEngine.isSelectionSafe(range)) {
-              plannedTasks.push({
-                startIdx: match.start,
-                range,
-                isCollapsed: rec.isCollapsed
-              });
-            }
-          } catch (e) {}
-        }
-      }
-    });
-
-    // 2. 逆向拓扑排序（自底向上包裹，防止先序节点 DOM 变更破坏后续节点 Range 的 offset）
-    plannedTasks.sort((a, b) => b.startIdx - a.startIdx);
-    plannedTasks.forEach((task) => {
-      if (!DOMEngine.rangeOverlapsFoldBlock(task.range)) {
-        DOMEngine.createFoldFromRange(task.range, task.isCollapsed);
-      }
-    });
-  }
-};
-
-// =============================================================================
-// 6. 前台控制器与事件总线
-// =============================================================================
-
-const AppController = {
-  customStyleEl: null,
-
-  /**
-   * 初始化注入扩展专属 CSS 样式
-   */
-  initStyles() {
-    const baseStyle = document.createElement("style");
-    baseStyle.id = "tf-base-style";
-    baseStyle.textContent = STYLES.BASE;
-    document.head.appendChild(baseStyle);
-
-    this.customStyleEl = document.createElement("style");
-    this.customStyleEl.id = "tf-custom-style";
-    document.head.appendChild(this.customStyleEl);
-
-    Utils.getStorage({ customCss: STYLES.FALLBACK_BLUE }).then((res) => {
-      this.customStyleEl.textContent = res?.customCss || STYLES.FALLBACK_BLUE;
-    });
-  },
-
-  /**
-   * 更新并缓存当前合法选区
-   */
-  updateSelectionCache() {
-    const selection = window.getSelection();
-    if (selection && !selection.isCollapsed && selection.rangeCount > 0) {
-      const range = selection.getRangeAt(0);
-      if (DOMEngine.isSelectionSafe(range) && !DOMEngine.rangeOverlapsFoldBlock(range)) {
-        UIState.cachedRange = range.cloneRange();
-        return;
-      }
-    }
-    UIState.clearSelectionCache();
-  },
-
-  /**
-   * 动态同步右键菜单文案（根据当前选中/点击的区域动态调整）
-   */
-  syncContextMenu(e) {
-    UIState.rightClickedElement = Utils.getSafeElement(e.target);
-    const foldTarget = UIState.rightClickedElement?.closest?.(`.${CONFIG.CLASSES.BLOCK}`);
-
-    const currentSel = window.getSelection();
-    const validSelection = currentSel && !currentSel.isCollapsed && currentSel.rangeCount > 0 
-      ? DOMEngine.isSelectionSafe(currentSel.getRangeAt(0)) 
-      : false;
-
-    let title = "设置为可折叠区域";
-    if (foldTarget) {
-      title = "取消该折叠区域";
-    } else if (!validSelection && !UIState.cachedRange) {
-      title = "当前区域不可折叠";
-    }
-
-    Utils.sendMessage({ action: "UPDATE_MENU_TITLE", title });
-  },
-
-  /**
-   * 执行折叠区域创建
-   */
-  async executeMakeFoldable() {
-    const res = await Utils.getStorage(CONFIG.DEFAULT_SETTINGS);
-    if (!res?.isEnabled) return;
-
-    let targetRange = null;
-    const currentSel = window.getSelection();
-
-    if (currentSel && !currentSel.isCollapsed && currentSel.rangeCount > 0) {
-      targetRange = currentSel.getRangeAt(0);
-    } else if (UIState.cachedRange) {
-      targetRange = UIState.cachedRange;
-    }
-
-    if (!targetRange || targetRange.collapsed) return;
-    if (!DOMEngine.isSelectionSafe(targetRange) || DOMEngine.rangeOverlapsFoldBlock(targetRange)) return;
-
-    const wrapper = DOMEngine.createFoldFromRange(targetRange, res.collapseInitially);
-    if (currentSel) currentSel.removeAllRanges();
-    UIState.clearSelectionCache();
-
-    if (wrapper) PersistenceManager.savePageState();
-  },
-
-  /**
-   * 寻找快捷键还原折叠块时的候选目标
-   */
-  findTargetFoldBlockForRestore() {
-    const candidates = [
-      UIState.lastHoveredElement,
-      window.getSelection()?.anchorNode,
-      document.activeElement,
-      UIState.rightClickedElement
-    ];
-
-    for (const target of candidates) {
-      if (target) {
-        const fold = Utils.getSafeElement(target)?.closest?.(`.${CONFIG.CLASSES.BLOCK}`);
-        if (fold) return fold;
-      }
-    }
-    return null;
-  },
-
-  /**
-   * 绑定 DOM 事件监听与 Chrome 运行时消息
-   */
-  bindEvents() {
-    // 监听鼠标轨迹与选区状态
-    document.addEventListener("mouseover", (e) => {
-      UIState.lastHoveredElement = Utils.getSafeElement(e.target);
-    }, true);
-
-    document.addEventListener("mouseup", () => this.updateSelectionCache());
-    document.addEventListener("keyup", () => this.updateSelectionCache());
-
-    document.addEventListener("pointerdown", (e) => {
-      if (e.button === 2) this.syncContextMenu(e);
-    }, true);
-
-    document.addEventListener("contextmenu", (e) => {
-      this.syncContextMenu(e);
-      this.updateSelectionCache();
-    }, true);
-
-    // 统一委托折叠块展开/收起按钮点击事件
-    document.addEventListener("click", (e) => {
-      const toggleBtn = Utils.getSafeElement(e.target)?.closest?.(`.${CONFIG.CLASSES.BTN}`);
-      if (!toggleBtn) return;
-
-      const wrapper = toggleBtn.closest(`.${CONFIG.CLASSES.BLOCK}`);
-      const body = wrapper?.querySelector(`.${CONFIG.CLASSES.BODY}`);
-      if (!wrapper || !body) return;
-
-      e.preventDefault();
-      e.stopPropagation();
+  toggleFoldBlock(wrapper, scrollToView = false) {
+    if (!wrapper) return;
+    UIState.isInternalAction = true;
+    try {
+      const body = wrapper.querySelector(`.${CONFIG.CLASSES.BODY}`);
+      const headerBtn = wrapper.querySelector(`.${CONFIG.CLASSES.HEADER} .${CONFIG.CLASSES.BTN}`);
+      if (!body) return;
 
       const willCollapse = !body.classList.contains(CONFIG.CLASSES.FOLDED);
       body.classList.toggle(CONFIG.CLASSES.FOLDED, willCollapse);
       wrapper.classList.toggle(CONFIG.CLASSES.COLLAPSED, willCollapse);
 
-      toggleBtn.innerHTML = willCollapse 
-        ? "▶ <span>已折叠内容 (点击展开)</span>" 
-        : "▼ <span>收起此段</span>";
+      if (headerBtn) {
+        headerBtn.innerHTML = willCollapse ? "▶ <span>已折叠内容 (点击展开)</span>" : "▼ <span>收起此段</span>";
+      }
 
-      PersistenceManager.savePageState();
-    });
+      if (scrollToView && willCollapse) wrapper.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      PersistenceManager.updateFoldStateOnly(wrapper.dataset.tfId, willCollapse);
+    } finally {
+      setTimeout(() => { UIState.isInternalAction = false; }, 50);
+    }
+  }
+};
 
-    // 监听来自 Background 或 Popup 的调度指令
-    if (chrome.runtime?.onMessage) {
-      chrome.runtime.onMessage.addListener((req) => {
-        switch (req.action) {
-          case "TRIGGER_CONTEXT_ACTION": {
-            const foldWrapper = UIState.rightClickedElement?.closest?.(`.${CONFIG.CLASSES.BLOCK}`);
-            foldWrapper ? DOMEngine.restoreFold(foldWrapper) : this.executeMakeFoldable();
-            break;
+// =============================================================================
+// 5. 经典绝对精度持久化记忆与复原引擎
+// =============================================================================
+
+const PersistenceManager = {
+  localCacheRecords: [],
+  isRestoring: false,
+
+  getStorageKey: () => "tf_store_" + window.location.origin + decodeURIComponent(window.location.pathname) + window.location.search,
+
+  async initCache() {
+    const key = this.getStorageKey();
+    const payload = (await Utils.getStorage([key]))[key];
+    this.localCacheRecords = Array.isArray(payload?.data) ? payload.data : [];
+  },
+
+  registerFoldRecord(foldId, record) {
+    if (!this.localCacheRecords) this.localCacheRecords = [];
+    const idx = this.localCacheRecords.findIndex(r => r.id === foldId);
+    idx >= 0 ? (this.localCacheRecords[idx] = record) : this.localCacheRecords.push(record);
+    this.persistCache();
+  },
+
+  updateFoldStateOnly(foldId, isCollapsed) {
+    if (!this.localCacheRecords) return;
+    const item = this.localCacheRecords.find(r => r.id === foldId);
+    if (item) {
+      item.isCollapsed = isCollapsed;
+      this.persistCache();
+    }
+  },
+
+  removeFoldRecord(foldId) {
+    if (!this.localCacheRecords) return;
+    this.localCacheRecords = this.localCacheRecords.filter(r => r.id !== foldId);
+    this.persistCache();
+  },
+
+  async persistCache() {
+    const settings = await Utils.getStorage({ autoSave: CONFIG.DEFAULT_SETTINGS.autoSave });
+    if (!settings?.autoSave) return;
+    const key = this.getStorageKey();
+    if (!this.localCacheRecords || !this.localCacheRecords.length) return Utils.removeStorage(key);
+    await Utils.setStorage({ [key]: { updatedAt: Date.now(), data: this.localCacheRecords } });
+  },
+
+  findBestAnchorMatch(fullText, exact) {
+    if (!exact || exact.length < 2) return null;
+
+    const pos = fullText.indexOf(exact);
+    if (pos !== -1) return { start: pos, end: pos + exact.length };
+
+    const headLen = Math.min(30, Math.floor(exact.length / 2));
+    const tailLen = Math.min(30, Math.floor(exact.length / 2));
+    const head = exact.slice(0, headLen);
+    const tail = exact.slice(-tailLen);
+
+    let hPos = fullText.indexOf(head);
+    while (hPos !== -1) {
+      const estimatedTailPos = fullText.indexOf(tail, hPos);
+      if (estimatedTailPos !== -1 && (estimatedTailPos - hPos) <= exact.length * 1.6) {
+        return { start: hPos, end: estimatedTailPos + tail.length };
+      }
+      hPos = fullText.indexOf(head, hPos + 1);
+    }
+    return null;
+  },
+
+  // 严格基于 (TextNode, 原始真实Offset) 映射复原，确保 100% 绝对精度
+  async restorePageState() {
+    if (this.isRestoring || UIState.isSendingMessage || UIState.isInternalAction) return false;
+    const settings = await Utils.getStorage(CONFIG.DEFAULT_SETTINGS);
+    if (!settings?.isEnabled || !settings?.autoSave || !this.localCacheRecords?.length) return false;
+
+    const rootContainer = document.body;
+    const existingIds = new Set(Array.from(rootContainer.querySelectorAll(`.${CONFIG.CLASSES.BLOCK}`)).map(el => el.dataset.tfId));
+    const pending = this.localCacheRecords.filter(rec => !existingIds.has(rec.id));
+    
+    if (!pending.length) return true;
+
+    this.isRestoring = true;
+    try {
+      const walker = document.createTreeWalker(rootContainer, NodeFilter.SHOW_TEXT, {
+        acceptNode: (node) => {
+          if (node.parentElement?.closest(`script, style, .${CONFIG.CLASSES.BLOCK}, textarea, input, [data-writing-block-fullscreen-editor-region]`)) {
+            return NodeFilter.FILTER_REJECT;
           }
-          case "COMMAND_FOLD":
-            this.executeMakeFoldable();
-            break;
-          case "COMMAND_RESTORE": {
-            const targetFold = this.findTargetFoldBlockForRestore();
-            if (targetFold) DOMEngine.restoreFold(targetFold);
-            break;
-          }
-          case "CLEAR_PAGE_FOLDS": {
-            document.querySelectorAll(`.${CONFIG.CLASSES.BLOCK}`).forEach((w) => DOMEngine.restoreFold(w));
-            Utils.removeStorage(PersistenceManager.getStorageKey());
-            break;
-          }
-          case "APPLY_CUSTOM_CSS":
-            if (this.customStyleEl) this.customStyleEl.textContent = req.css;
-            break;
+          return NodeFilter.FILTER_ACCEPT;
         }
       });
+
+      let fullText = "";
+      const charMap = [];
+      let node;
+      while ((node = walker.nextNode())) {
+        const raw = node.textContent;
+        for (let i = 0; i < raw.length; i++) {
+          const ch = raw[i];
+          if (ch === "\u00a0" || /[ \t\r\n]/.test(ch)) {
+            if (fullText.length === 0 || fullText[fullText.length - 1] !== " ") {
+              fullText += " ";
+              charMap.push({ node, offset: i });
+            }
+          } else {
+            fullText += ch;
+            charMap.push({ node, offset: i });
+          }
+        }
+      }
+
+      const tasks = [];
+      pending.forEach(rec => {
+        const match = this.findBestAnchorMatch(fullText, rec.exact);
+        if (match && match.start < charMap.length && match.end <= charMap.length) {
+          const sC = charMap[match.start];
+          const eC = charMap[match.end - 1];
+          if (sC && eC) {
+            try {
+              const range = document.createRange();
+              range.setStart(sC.node, sC.offset);
+              range.setEnd(eC.node, Math.min(eC.offset + 1, eC.node.textContent.length));
+              if (DOMEngine.isSelectionSafe(range)) {
+                tasks.push({ startIdx: match.start, range, id: rec.id, isCollapsed: rec.isCollapsed });
+              }
+            } catch (e) {}
+          }
+        }
+      });
+
+      if (tasks.length) {
+        tasks.sort((a, b) => b.startIdx - a.startIdx);
+        requestAnimationFrame(() => {
+          // 关键：恢复时显式指定 isManualSelection = true，防止二次贪婪外扩
+          tasks.forEach(t => DOMEngine.createFoldFromRange(t.range, t.isCollapsed, t.id, true));
+        });
+      }
+    } finally {
+      this.isRestoring = false;
     }
+    return true;
+  }
+};
 
-    // 页面加载与路由跳转防抖恢复调度
-    let restoreTimer = null;
-    const scheduleRestore = () => {
-      clearTimeout(restoreTimer);
-      restoreTimer = setTimeout(() => PersistenceManager.restorePageState(), 250);
-    };
+// =============================================================================
+// 6. 顶层控制器与生命周期管理
+// =============================================================================
 
-    if (document.readyState === "loading") {
-      document.addEventListener("DOMContentLoaded", scheduleRestore);
-    } else {
-      scheduleRestore();
-    }
+const AppController = {
+  customStyleEl: null,
+  domObserver: null,
+  observerTimer: null,
+  lastUrl: window.location.href,
 
-    // SPA 路由劫持监听（无 DOM 轮询性能损耗）
-    window.addEventListener("popstate", scheduleRestore);
-    window.addEventListener("hashchange", scheduleRestore);
+  initStyles() {
+    const baseStyle = document.createElement("style");
+    baseStyle.textContent = STYLES.BASE;
+    document.head.appendChild(baseStyle);
 
-    ["pushState", "replaceState"].forEach((method) => {
-      const original = history[method];
-      if (typeof original === "function") {
-        history[method] = function (...args) {
-          const res = original.apply(this, args);
-          scheduleRestore();
-          return res;
-        };
+    this.customStyleEl = document.createElement("style");
+    document.head.appendChild(this.customStyleEl);
+
+    Utils.getStorage({ customCss: "" }).then(res => {
+      if (res?.customCss && !res.customCss.includes("rgba(239, 246, 255")) {
+        this.customStyleEl.textContent = res.customCss;
       }
     });
   },
 
-  /**
-   * 应用入口
-   */
+  updateDeepSelection() {
+    let sel = window.getSelection();
+    let range = (sel && !sel.isCollapsed && sel.rangeCount > 0) ? sel.getRangeAt(0) : null;
+    if (!range && document.activeElement?.shadowRoot) {
+      sel = document.activeElement.shadowRoot.getSelection?.();
+      range = (sel && !sel.isCollapsed && sel.rangeCount > 0) ? sel.getRangeAt(0) : null;
+    }
+    UIState.cachedRange = (range && DOMEngine.isSelectionSafe(range)) ? range.cloneRange() : null;
+    return UIState.cachedRange;
+  },
+
+  async syncContextMenu(e) {
+    const settings = await Utils.getStorage(CONFIG.DEFAULT_SETTINGS);
+    if (!settings?.isEnabled) return;
+    
+    UIState.rightClickedElement = Utils.getSafeElement(e.target);
+    const foldTarget = UIState.rightClickedElement?.closest(`.${CONFIG.CLASSES.BLOCK}`);
+    const effectiveRange = DOMEngine.smartSniffTargetRange(UIState.rightClickedElement, this.updateDeepSelection());
+
+    Utils.sendMessage({
+      action: "UPDATE_MENU_TITLE",
+      title: foldTarget ? "取消该折叠区域" : (effectiveRange ? "设置为可折叠区域" : "当前区域不可折叠")
+    });
+  },
+
+  async executeCreateFold(targetRange, isManualSelection = false) {
+    if (!targetRange) return;
+    const settings = await Utils.getStorage(CONFIG.DEFAULT_SETTINGS);
+    if (!settings?.isEnabled) return;
+
+    DOMEngine.createFoldFromRange(targetRange, settings.collapseInitially, null, isManualSelection);
+    const sel = window.getSelection();
+    if (sel) sel.removeAllRanges();
+    UIState.clearSelectionCache();
+  },
+
+  bindMouseEvents() {
+    document.addEventListener("mouseover", e => UIState.lastHoveredElement = Utils.getSafeElement(e.target), true);
+    document.addEventListener("mouseup", () => this.updateDeepSelection(), true);
+    document.addEventListener("pointerdown", e => {
+      if (e.button === 2) {
+        this.updateDeepSelection();
+        this.syncContextMenu(e);
+      }
+    }, true);
+    document.addEventListener("contextmenu", e => this.syncContextMenu(e), true);
+  },
+
+  bindKeyboardEvents() {
+    document.addEventListener("keyup", () => this.updateDeepSelection(), true);
+    document.addEventListener("keydown", e => {
+      if (e.key === "Enter" && !e.shiftKey && Utils.getSafeElement(e.target)?.closest("textarea, input, [contenteditable='true']")) {
+        UIState.lockTyping();
+      }
+    }, true);
+  },
+
+  bindClickEvents() {
+    document.addEventListener("click", e => {
+      const targetEl = Utils.getSafeElement(e.target);
+      
+      if (targetEl?.closest("button[data-testid='send-button'], button[aria-label='发送提示词'], form button[type='submit']")) {
+        UIState.lockTyping();
+      }
+
+      const toggleBtn = targetEl?.closest(`.${CONFIG.CLASSES.BTN}`);
+      if (toggleBtn) {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        DOMEngine.toggleFoldBlock(toggleBtn.closest(`.${CONFIG.CLASSES.BLOCK}`), false);
+        return;
+      }
+
+      const foldBlock = targetEl?.closest(`.${CONFIG.CLASSES.BLOCK}`);
+      if (foldBlock && !foldBlock.classList.contains(CONFIG.CLASSES.COLLAPSED)) {
+        if (e.clientX >= foldBlock.getBoundingClientRect().left - 4 && e.clientX <= foldBlock.getBoundingClientRect().left + CONFIG.UI.LEFT_HOTZONE_WIDTH) {
+          const sel = window.getSelection();
+          if (!sel || sel.isCollapsed) {
+            e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation();
+            DOMEngine.toggleFoldBlock(foldBlock, true);
+          }
+        }
+      }
+    }, true);
+  },
+
+  bindExtensionMessages() {
+    chrome.runtime?.onMessage?.addListener((req, sender, sendResponse) => {
+      const hasManualRange = !!UIState.cachedRange;
+      const activeRange = DOMEngine.smartSniffTargetRange(UIState.lastHoveredElement, this.updateDeepSelection());
+      
+      switch (req.action) {
+        case "TRIGGER_CONTEXT_ACTION":
+          const foldWrapper = UIState.rightClickedElement?.closest(`.${CONFIG.CLASSES.BLOCK}`);
+          if (foldWrapper) DOMEngine.restoreFold(foldWrapper);
+          else if (activeRange) this.executeCreateFold(activeRange, hasManualRange);
+          break;
+        case "COMMAND_FOLD":
+          if (activeRange) this.executeCreateFold(activeRange, hasManualRange);
+          break;
+        case "COMMAND_RESTORE":
+          DOMEngine.restoreFold(UIState.lastHoveredElement?.closest(`.${CONFIG.CLASSES.BLOCK}`));
+          break;
+        case "CLEAR_PAGE_FOLDS":
+          PersistenceManager.localCacheRecords = [];
+          Utils.removeStorage(PersistenceManager.getStorageKey());
+          document.querySelectorAll(`.${CONFIG.CLASSES.BLOCK}`).forEach(w => DOMEngine.restoreFold(w));
+          break;
+        case "APPLY_CUSTOM_CSS":
+          if (this.customStyleEl) this.customStyleEl.textContent = req.css;
+          break;
+      }
+      sendResponse?.({ success: true });
+      return true;
+    });
+
+    if (chrome.storage?.onChanged) {
+      chrome.storage.onChanged.addListener((changes, area) => {
+        if (area === "local" && changes.isEnabled) {
+          if (changes.isEnabled.newValue === false) {
+            document.querySelectorAll(`.${CONFIG.CLASSES.BLOCK}`).forEach(w => DOMEngine.restoreFold(w));
+          } else if (changes.isEnabled.newValue === true) {
+            PersistenceManager.restorePageState();
+          }
+        }
+      });
+    }
+  },
+
+  initDOMObserver() {
+    this.domObserver = new MutationObserver(mutations => {
+      if (window.location.href !== this.lastUrl) {
+        this.lastUrl = window.location.href;
+        document.querySelectorAll(`.${CONFIG.CLASSES.BLOCK}`).forEach(w => DOMEngine.restoreFold(w));
+        PersistenceManager.initCache().then(() => PersistenceManager.restorePageState());
+        return;
+      }
+
+      if (UIState.isInternalAction || PersistenceManager.isRestoring || UIState.isSendingMessage || !PersistenceManager.localCacheRecords?.length) return;
+
+      const existingIds = new Set(Array.from(document.querySelectorAll(`.${CONFIG.CLASSES.BLOCK}`)).map(el => el.dataset.tfId));
+      if (!PersistenceManager.localCacheRecords.some(rec => !existingIds.has(rec.id))) return;
+
+      if (!mutations.some(m => !Utils.getSafeElement(m.target)?.closest(`.${CONFIG.CLASSES.BLOCK}`))) return;
+
+      clearTimeout(this.observerTimer);
+      this.observerTimer = setTimeout(() => PersistenceManager.restorePageState(), CONFIG.TIMING.OBSERVER_DEBOUNCE);
+    });
+
+    this.domObserver.observe(document.body, { childList: true, subtree: true });
+  },
+
   start() {
     this.initStyles();
-    this.bindEvents();
+    this.bindMouseEvents();
+    this.bindKeyboardEvents();
+    this.bindClickEvents();
+    this.bindExtensionMessages();
+    this.initDOMObserver();
+    
+    const triggerPageRestore = () => {
+      PersistenceManager.initCache().then(() => {
+        if (!PersistenceManager.localCacheRecords.length) return;
+        CONFIG.TIMING.RESTORE_DELAYS.forEach(delay => setTimeout(() => PersistenceManager.restorePageState(), delay));
+      });
+    };
+
+    triggerPageRestore();
+
+    window.addEventListener("popstate", triggerPageRestore);
+    window.addEventListener("hashchange", triggerPageRestore);
+
+    setInterval(() => {
+      if (window.location.href !== this.lastUrl) {
+        this.lastUrl = window.location.href;
+        triggerPageRestore();
+      }
+    }, CONFIG.TIMING.URL_POLL_INTERVAL);
   }
 };
 
-// 启动控制器
+// 启动应用
 AppController.start();

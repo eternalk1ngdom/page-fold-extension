@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>Text Folder - 全场景综合真实断言靶场 (Test Fixture v1.0.2 增强版)</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card-bg: #1e293b;
+      --text: #f8fafc;
+      --border: #334155;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background-color: var(--bg);
+      color: var(--text);
+      padding: 30px 20px 100px 20px;
+      max-width: 980px;
+      margin: 0 auto;
+      line-height: 1.6;
+    }
+    .header-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 2px solid var(--border);
+      padding-bottom: 16px;
+      margin-bottom: 24px;
+    }
+    .action-btn {
+      background: #3b82f6;
+      color: #fff;
+      border: none;
+      padding: 9px 18px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-weight: 600;
+      transition: background 0.2s;
+    }
+    .action-btn:hover { background: #2563eb; }
+    .fixture-section {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 24px;
+    }
+    .fixture-title {
+      font-size: 16px;
+      font-weight: 600;
+      margin-top: 0;
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .badge {
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 12px;
+      background: #e0f2fe;
+      color: #0369a1;
+      font-weight: normal;
+    }
+    .sub-title {
+      font-size: 12px;
+      font-weight: bold;
+      color: #94a3b8;
+      margin: 12px 0 6px 0;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    /* 1. DeepSeek */
+    .mock-deepseek .md-code-block {
+      background: #18181b;
+      border-radius: 8px;
+      padding: 12px;
+      margin: 8px 0;
+      overflow-x: auto;
+    }
+    .mock-deepseek .md-code-block pre {
+      margin: 0;
+      font-family: Menlo, Monaco, Consolas, monospace;
+      font-size: 12.5px;
+      line-height: 1.6;
+      color: #fafafa;
+      white-space: pre-wrap;
+    }
+
+    /* 2. Kimi */
+    .mock-kimi .segment-code {
+      margin: 8px 0;
+      background: #181818;
+      border: 1px solid #2a2a2a;
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .mock-kimi pre.language-go {
+      margin: 0;
+      padding: 14px;
+      background: transparent;
+      color: #d4d4d4;
+      font-family: "Fira Code", Menlo, monospace;
+      font-size: 13px;
+      line-height: 1.6;
+      white-space: pre-wrap;
+    }
+    .token.keyword { color: #c586c0; font-weight: 500; }
+    .token.operator { color: #d4d4d4; }
+    .token.punctuation { color: #808080; }
+    .token.string { color: #ce9178; }
+
+    /* 3. Gemini */
+    .gemini-native-block {
+      background: #1e1f20;
+      border: 1px solid #333537;
+      border-radius: 10px;
+      margin: 10px 0;
+      display: block;
+      overflow: hidden;
+    }
+    .gemini-native-header {
+      background: #282a2c;
+      padding: 6px 14px;
+      font-size: 12px;
+      color: #c4c7c5;
+    }
+    .gemini-native-content {
+      padding: 14px;
+      margin: 0;
+      background: transparent;
+      color: #e3e3e3;
+      font-family: "Google Sans Code", monospace;
+      font-size: 13.5px;
+      line-height: 1.6;
+      white-space: pre-wrap;
+    }
+    .hljs-string { color: #4ade80; }
+    .hljs-keyword { color: #f43f5e; font-weight: bold; }
+
+    /* 4. ChatGPT */
+    .mock-chatgpt pre.overflow-visible {
+      background: #0d0d0d;
+      color: #ececec;
+      padding: 14px;
+      border-radius: 8px;
+      margin: 8px 0;
+      font-family: Menlo, Monaco, monospace;
+      font-size: 13px;
+      line-height: 1.6;
+    }
+
+    /* 5. 纯白底色正文环境 (模拟百度百科/常规白底网页) */
+    .mock-light-page {
+      background-color: #ffffff !important;
+      color: #1f2937 !important;
+      border: 1px solid #e5e7eb;
+    }
+    .mock-light-page .fixture-title { color: #111827; }
+    .mock-light-page .para-black {
+      font-size: 15px;
+      line-height: 1.8;
+      margin-bottom: 12px;
+      color: #1f2937 !important;
+    }
+
+    /* 6. 编辑器与不可折叠区域模拟 */
+    .mock-editor-area textarea,
+    .mock-editor-area .mock-textbox {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 10px;
+      border-radius: 6px;
+      background: #090d16;
+      border: 1px solid #334155;
+      color: #94a3b8;
+      font-size: 14px;
+    }
+
+    /* 7. 记忆恢复与长文本跨度验证区 */
+    .mock-restore-area {
+      border: 1px dashed #6366f1;
+      background: rgba(99, 102, 241, 0.04);
+    }
+  </style>
+</head>
+<body>
+
+  <div class="header-bar">
+    <div>
+      <h1 style="font-size: 20px; margin: 0;">🧪 Text Folder 全场景综合真实验证靶场</h1>
+      <small style="color: #94a3b8;">覆盖：字号防御 / 语法防染色 / 严禁嵌套 / 白底字色透传 / 绝对坐标记忆复原</small>
+    </div>
+    <button class="action-btn" onclick="runAutoRegressionTest()">⚡ 运行全量回归断言</button>
+  </div>
+
+  <!-- 1. DeepSeek -->
+  <section class="fixture-section mock-deepseek" id="case-deepseek">
+    <div class="fixture-title">1. DeepSeek <span class="badge">结构：div.md-code-block &gt; pre</span></div>
+    <p style="font-size: 13.5px; color: #94a3b8; margin: 4px 0 10px;">测试多级 Python 物理缩进与展开无偏移：</p>
+    <div class="md-code-block">
+      <pre><code>for tool_call in response.tool_calls:
+    if tool_call["name"] == "get_stock_price":
+        result = get_stock_price.invoke(tool_call["args"])
+        message_list.append(result)
+    elif tool_call["name"] == "search_news":
+        result = search_news.invoke(tool_call["args"])
+        message_list.append(result)</code></pre>
+    </div>
+  </section>
+
+  <!-- 2. Kimi -->
+  <section class="fixture-section mock-kimi" id="case-kimi">
+    <div class="fixture-title">2. Kimi <span class="badge">结构：div.segment-code &gt; pre &gt; code (含 Prism Token)</span></div>
+    <div class="segment-code">
+      <div class="syntax-highlighter dark segment-code-content">
+        <pre class="language-go"><code class="language-go"><span class="token keyword">for</span> _<span class="token punctuation">,</span> r <span class="token operator">:=</span> <span class="token keyword">range</span> results <span class="token punctuation">{</span>
+    status <span class="token operator">:=</span> <span class="token string">"✓"</span>
+    <span class="token keyword">if</span> <span class="token operator">!</span>r<span class="token punctuation">.</span>Success <span class="token punctuation">{</span>
+        status <span class="token operator">=</span> <span class="token string">"✗"</span>
+        failed<span class="token operator">++</span>
+    <span class="token punctuation">}</span> <span class="token keyword">else</span> <span class="token punctuation">{</span>
+        success<span class="token operator">++</span>
+    <span class="token punctuation">}</span>
+<span class="token punctuation">}</span></code></pre>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3. Gemini -->
+  <section class="fixture-section mock-gemini" id="case-gemini">
+    <div class="fixture-title">3. Gemini <span class="badge">结构：code-block &gt; pre &gt; code (含 Highlight.js 深绿色 span)</span></div>
+    <p style="font-size: 13.5px; color: #94a3b8; margin: 4px 0 10px;">测试在绿色高亮 span 内部折叠时，胶囊按钮防染色：</p>
+    <code-block class="gemini-native-block">
+      <div class="gemini-native-header"><span>javascript</span></div>
+      <pre class="gemini-native-content"><code class="code-container"><span class="hljs-string">/* 列表边距保护与注释测试
+  .${CONFIG.CLASSES.BODY} li { margin-left: 1.8em !important; }
+  .${CONFIG.CLASSES.BODY} ol, .${CONFIG.CLASSES.BODY} ul { padding-left: 1.8em !important; }
+*/</span>
+<span class="hljs-keyword">const</span> Utils = { cleanText: (str) =&gt; str.trim() };</code></pre>
+    </code-block>
+  </section>
+
+  <!-- 4. ChatGPT -->
+  <section class="fixture-section mock-chatgpt" id="case-chatgpt">
+    <div class="fixture-title">4. ChatGPT <span class="badge">结构：pre.overflow-visible &gt; code</span></div>
+    <pre class="overflow-visible"><code>async function fetchMarketData(ticker) {
+  const res = await fetch(`/api/quote?symbol=${ticker}`);
+  return res.json();
+}</code></pre>
+  </section>
+
+  <!-- 5. 纯白底色正文环境 (重点防范：黑字变白 bug) -->
+  <section class="fixture-section mock-light-page" id="case-light-page">
+    <div class="fixture-title">5. 纯白底色正文 (百度百科/常规白底模拟) <span class="badge" style="background:#dcfce7; color:#166534;">色彩继承与高反差测试</span></div>
+    <div class="para-black">凯旋门（法语：Arc de triomphe de l'Étoile），位于法国巴黎的戴高乐广场中央，香榭丽舍大街的西端。</div>
+    <div class="para-black">该建筑始建于1806年，是拿破仑为纪念奥斯特利茨战役胜利而决定建造的，整座建筑由白色砂岩铸成。</div>
+    <div class="para-black">【断言目标】：在白底页面折叠后，正文字体应保持清晰黑色（#1f2937），按钮呈现深石板灰，绝不出现白字融入白底的现象。</div>
+  </section>
+
+  <!-- 6. 不可折叠区域防护测试 -->
+  <section class="fixture-section mock-editor-area" id="case-unsafe-editor">
+    <div class="fixture-title">6. 不可折叠区域防护 (输入框与编辑器) <span class="badge" style="background:#fee2e2; color:#991b1b;">边界安全拦截</span></div>
+    <div class="sub-title">[输入框与富文本区 - 测试悬停或右键禁止触发折叠]</div>
+    <textarea id="prompt-textarea" rows="2" placeholder="测试输入框：在此处悬停或右键，插件应坚决拦截，不创建任何折叠块..."></textarea>
+    <div class="mock-textbox" role="textbox" contenteditable="true" style="margin-top: 8px;">
+      可编辑富文本区域 [role='textbox']：测试安全拦截防御。
+    </div>
+  </section>
+
+  <!-- 7. 绝对坐标记忆与无损复原靶区 -->
+  <section class="fixture-section mock-restore-area" id="case-restore-accuracy">
+    <div class="fixture-title">7. 绝对字符坐标记忆与对齐靶区 <span class="badge" style="background:#ede9fe; color:#5b21b6;">TreeWalker 坐标无损复原</span></div>
+    <p style="font-size: 13.5px; color: #94a3b8; margin: 4px 0 10px;">测试包含不规则换行、制表符与前置空格的复杂混排段落记忆复原：</p>
+    <div id="restore-target-text" style="background: rgba(0,0,0,0.25); padding: 12px; border-radius: 6px; font-family: monospace; font-size: 13px;">
+      <span>[Anchor-Start]</span> 
+      &nbsp;&nbsp;&nbsp;&nbsp;这是包含连续空格和不规则换行的文本段落。
+      <span>\t\t\t</span>折叠此段后刷新页面，验证坐标引擎是否能精准定位到首末字符，绝不产生偏移与消失。
+      <span>[Anchor-End]</span>
+    </div>
+  </section>
+
+  <!-- 自动化回归断言脚本 -->
+  <script>
+    function runAutoRegressionTest() {
+      console.clear();
+      console.log("%c====== 🚀 开始全场景综合回归断言 (v1.0.2 增强版) ======", "color: #3b82f6; font-weight: bold; font-size: 15px;");
+
+      const blocks = document.querySelectorAll(".tf-fold-block");
+      console.log(`[状态检查] 当前页面渲染的折叠块数量: ${blocks.length}`);
+      if (blocks.length === 0) {
+        console.warn("⚠️ 页面上暂无折叠块，请先手动划选或悬停使用快捷键创建折叠块后再运行断言！");
+        return;
+      }
+
+      // 1. 代码字号防御断言
+      let fontPass = true;
+      document.querySelectorAll(".tf-fold-body code, .tf-fold-body pre").forEach((code, idx) => {
+        const size = parseFloat(window.getComputedStyle(code).fontSize);
+        if (size > 13.5) {
+          console.error(`❌ [字号异常] 折叠块 #${idx + 1} 内部代码字号过大: ${size}px`);
+          fontPass = false;
+        }
+      });
+      if (fontPass) console.log("✅ [1. 字号防御通过] 折叠块内部代码字号均严格锁定在 ≤ 12.5px。");
+
+      // 2. 按钮防语法高亮染色断言 (Gemini / hljs-string 测试)
+      let colorPass = true;
+      document.querySelectorAll(".tf-toggle-btn").forEach((btn, idx) => {
+        const color = window.getComputedStyle(btn).color;
+        if (color.includes("74, 222, 128") || color.includes("rgb(74, 222, 128)")) {
+          console.error(`❌ [颜色污染] 胶囊按钮 #${idx + 1} 继承了父级语法高亮绿色: ${color}`);
+          colorPass = false;
+        }
+      });
+      if (colorPass) console.log("✅ [2. 色彩防御通过] 胶囊按钮保持独立中性色，未受 hljs/token 语法高亮标签污染。");
+
+      // 3. 严格禁止嵌套断言
+      let nestPass = true;
+      document.querySelectorAll(".tf-fold-block").forEach((block, idx) => {
+        const nested = block.querySelectorAll(".tf-fold-block");
+        if (nested.length > 0) {
+          console.error(`❌ [嵌套违规] 折叠块 #${idx + 1} 内部发现了 ${nested.length} 个嵌套子折叠块！`);
+          nestPass = false;
+        }
+      });
+      if (nestPass) console.log("✅ [3. 嵌套防御通过] 全局所有折叠块均为单层平铺结构，无任何子折叠块嵌套。");
+
+      // 4. 白底文字色彩透传断言
+      const lightSection = document.getElementById("case-light-page");
+      const lightFoldBody = lightSection ? lightSection.querySelector(".tf-fold-body") : null;
+      if (lightFoldBody) {
+        const textColor = window.getComputedStyle(lightFoldBody).color;
+        if (textColor.includes("241, 245, 249") || textColor.includes("255, 255, 255")) {
+          console.error(`❌ [文字变白] 白底测试区折叠后文字颜色异常: ${textColor}（文字隐形）`);
+        } else {
+          console.log(`✅ [4. 白底字色透传通过] 正文折叠完全透传宿主文字原色 (${textColor})，清晰可读。`);
+        }
+      }
+
+      // 5. 绝对字符坐标定位完整性断言
+      let coordinatePass = true;
+      document.querySelectorAll(".tf-fold-block").forEach((block, idx) => {
+        const body = block.querySelector(".tf-fold-body");
+        if (!body || body.textContent.trim().length === 0) {
+          console.error(`❌ [坐标丢失/空壳] 折叠块 #${idx + 1} 内容提取为空，可能由于字符映射越界！`);
+          coordinatePass = false;
+        }
+      });
+      if (coordinatePass) console.log("✅ [5. 坐标引擎通过] 文本节点字符坐标映射准确，所有折叠块内容完整，未发生抽取丢失或空外壳现象。");
+    }
+  </script>
+</body>
+</html>

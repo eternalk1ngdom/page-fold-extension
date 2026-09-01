@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Text Folder - 网页文本折叠工具",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "一键折叠网页多余文字，收起不重要的内容，让阅读更清爽、更聚焦。",
   "permissions": [
     "contextMenus",
